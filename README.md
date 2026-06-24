@@ -2,8 +2,6 @@
 
 AI 推理后端性能基准测试工具。通过 OpenAI 兼容 API 对 vLLM、SGLang 等推理后端进行压力测试，测量吞吐量（prefill/decode）、延迟（TTFT、TPOT 百分位）和并发扩展能力。
 
-Rust 实现，功能对等 [Go 版本](https://github.com/iperf-ai/iperf)，性能更优。
-
 ## 功能特性
 
 - **多后端支持** — vLLM、SGLang（OpenAI 兼容 API）
@@ -91,11 +89,12 @@ iperf hub download meta-llama/Llama-3-8B --local-dir ./models/llama3
 # 从自定义 hub 下载
 iperf hub download my-model --source http://my-hub:8080
 
-# 断点续传（自动）
+# 下载模型文件,一般用于多台机器同时下载,每个机器下载不同的文件
 iperf hub download meta-llama/Llama-3-8B --offset 5 --count 10
 ```
 
 ### `iperf hub serve` — 模型文件服务
+多台机器下载模型文件后,启动模型文件服务,其他机器可以访问模型文件,用于合并模型文件。
 
 ```bash
 iperf hub serve --local-dir ./models --addr 0.0.0.0:8080
