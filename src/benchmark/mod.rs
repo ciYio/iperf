@@ -19,10 +19,17 @@ pub fn corpus() -> Vec<char> {
 
 /// Generates prompts of varying length using a Box-Muller normal distribution,
 /// drawn from a pre-generated pool (simulates KV cache hit rate).
+///
+/// When prompt_stddev > 0:
+/// - Pool prompts are generated with max length (prompt_tokens + 3*stddev)
+/// - Each request randomly truncates to simulate normal distribution
 #[derive(Clone)]
 pub struct PromptGenerator {
     prompts: Arc<Vec<String>>,
     idx: Arc<Mutex<usize>>,
+    prompt_tokens: usize,
+    prompt_stddev: usize,
+    rng: Arc<Mutex<StdRng>>,
 }
 
 impl PromptGenerator {
@@ -30,35 +37,60 @@ impl PromptGenerator {
         let corpus = corpus();
         let mut gen_rng = StdRng::seed_from_u64(seed);
 
+        // Apply modulo 100 to stddev to keep it in reasonable range (0-99%)
+        let effective_stddev = prompt_stddev % 100;
+
+        // Use fixed max length for pool: 2x prompt_tokens (or at least prompt_tokens + 100)
+        // This ensures pool prompts are long enough for any truncation,
+        // and remain consistent regardless of stddev
+        let max_tokens = (prompt_tokens * 2).max(prompt_tokens + 100).min(corpus.len() / CHARS_PER_TOKEN);
+
         let prompts: Vec<String> = (0..num_prefix_prompts)
             .map(|_| {
-                let tokens = if prompt_stddev > 0 {
-                    // Box-Muller transform for normal distribution
-                    let u1: f64 = gen_rng.r#gen::<f64>().max(1e-10);
-                    let u2: f64 = gen_rng.r#gen::<f64>();
-                    let z = (-2.0_f64 * u1.ln()).sqrt() * (2.0_f64 * std::f64::consts::PI * u2).cos();
-                    let t = prompt_tokens as f64 + z * prompt_stddev as f64;
-                    (t.max(1.0) as usize).min(corpus.len() / CHARS_PER_TOKEN)
-                } else {
-                    prompt_tokens
-                };
-                let char_count = tokens * CHARS_PER_TOKEN;
+                let char_count = max_tokens * CHARS_PER_TOKEN;
                 let start = gen_rng.gen_range(0..corpus.len().saturating_sub(char_count).max(1));
                 corpus[start..start + char_count].iter().collect()
             })
             .collect();
 
+        // Use random seed for truncation RNG (not based on seed parameter)
+        // This ensures each run has different truncation patterns, even with same seed
+        let truncation_seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
         Self {
             prompts: Arc::new(prompts),
             idx: Arc::new(Mutex::new(0)),
+            prompt_tokens,
+            prompt_stddev: effective_stddev,
+            rng: Arc::new(Mutex::new(StdRng::seed_from_u64(truncation_seed))),
         }
     }
 
     pub fn next(&self) -> String {
         let mut idx = self.idx.lock().unwrap();
-        let prompt = self.prompts[*idx % self.prompts.len()].clone();
+        let full_prompt = self.prompts[*idx % self.prompts.len()].clone();
         *idx += 1;
-        prompt
+
+        // If stddev is 0, return full prompt
+        if self.prompt_stddev == 0 {
+            return full_prompt;
+        }
+
+        // Uniform distribution: prompt_tokens ± stddev%
+        let mut rng = self.rng.lock().unwrap();
+        let variation = rng.r#gen::<f64>() * 2.0 - 1.0; // -1.0 to 1.0
+        let variation_pct = variation * (self.prompt_stddev as f64 / 100.0);
+        let target_tokens = (self.prompt_tokens as f64 * (1.0 + variation_pct))
+            .max(1.0) as usize;
+
+        let char_count = target_tokens * CHARS_PER_TOKEN;
+        let truncate_len = char_count.min(full_prompt.len());
+
+        // Take the first truncate_len characters (prefix)
+        full_prompt[..truncate_len].to_string()
     }
 }
 

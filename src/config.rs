@@ -118,9 +118,15 @@ impl Config {
         if let Some(v) = o.prompt_tokens    { self.prompt_tokens = v; }
         if let Some(v) = o.output_tokens    { self.output_tokens = v; }
         if let Some(v) = o.no_cache         { self.no_cache = v; }
+        if let Some(v) = o.num_prefix_prompts { self.num_prefix_prompts = v; }
+        if let Some(v) = o.cache_rate       { self.cache_rate = v; }
+        if let Some(v) = o.seed             { self.seed = v; }
+        if let Some(v) = o.prompt_stddev    { self.prompt_stddev = v; }
         if let Some(ref v) = o.format       { self.format = v.clone(); }
+        if let Some(ref v) = o.output_dir   { self.output_dir = v.clone(); }
         if let Some(ref v) = o.http_proxy   { self.http_proxy = v.clone(); }
         if let Some(v) = o.trace            { self.trace = v; }
+        if let Some(ref v) = o.tag          { self.tag = v.clone(); }
         if let Some(v) = o.warmup           { self.warmup = v; }
     }
 
@@ -141,8 +147,14 @@ pub struct ConfigOverrides {
     pub prompt_tokens: Option<usize>,
     pub output_tokens: Option<usize>,
     pub no_cache: Option<bool>,
+    pub num_prefix_prompts: Option<usize>,
+    pub cache_rate: Option<usize>,
+    pub seed: Option<i64>,
+    pub prompt_stddev: Option<usize>,
     pub format: Option<String>,
+    pub output_dir: Option<String>,
     pub http_proxy: Option<String>,
     pub trace: Option<bool>,
+    pub tag: Option<String>,
     pub warmup: Option<usize>,
 }

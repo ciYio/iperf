@@ -27,9 +27,15 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         prompt_tokens: args.prompt_tokens,
         output_tokens: args.output_tokens,
         no_cache: if args.no_cache { Some(true) } else { None },
+        num_prefix_prompts: args.num_prefix_prompts,
+        cache_rate: args.cache_rate,
+        seed: args.seed,
+        prompt_stddev: args.prompt_tokens_stddev,
         format: args.format.clone(),
+        output_dir: args.output_dir.clone(),
         http_proxy: args.http_proxy.clone(),
         trace: if args.trace { Some(true) } else { None },
+        tag: args.tag.clone(),
         warmup: args.warmup,
     };
     cfg.merge_overrides(&overrides);

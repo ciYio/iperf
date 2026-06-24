@@ -12,16 +12,19 @@ pub struct Renderer {
     pub output_dir: String,
     pub model: String,
     pub backend: String,
+    #[allow(dead_code)]
     pub base_url: String,
     pub concurrent: usize,
     pub mode: String,
     pub tag: String,
     pub prompt_tokens: usize,
     pub output_tokens: usize,
+    #[allow(dead_code)]
     pub duration_secs: u64,
     pub no_cache: bool,
     pub seed: i64,
     pub prompt_stddev: usize,
+    #[allow(dead_code)]
     pub http_proxy: String,
     pub cache_rate: usize,
     pub num_prefix_prompts: usize,
@@ -32,10 +35,8 @@ pub struct Renderer {
 struct JsonOutput {
     // Config/metadata
     backend: String,
-    base_url: String,
     model: String,
     concurrent: usize,
-    duration: String,
     mode: String,
     prompt_tokens: usize,
     output_tokens: usize,
@@ -45,8 +46,6 @@ struct JsonOutput {
     seed: i64,
     #[serde(skip_serializing_if = "is_zero")]
     prompt_stddev: usize,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    http_proxy: String,
     #[serde(skip_serializing_if = "is_zero")]
     cache_rate: usize,
     #[serde(skip_serializing_if = "is_zero")]
@@ -80,6 +79,7 @@ struct JsonOutput {
     decode_tokens_per_sec: f64,
     total_tokens_per_sec: f64,
     tpm: String,
+    tpm_cache: String,
 
     // Token counts
     total_prompt_tokens: usize,
@@ -106,6 +106,7 @@ fn fmt_dur(d: std::time::Duration) -> String {
 }
 
 /// Format duration as Go-style string (e.g. "30s", "5m0s", "1h0m0s")
+#[allow(dead_code)]
 fn fmt_duration_go(secs: u64) -> String {
     if secs >= 3600 {
         let h = secs / 3600;
@@ -166,11 +167,7 @@ impl Renderer {
         println!("    Prefill:       {:.2} tok/sec", pd.prefill_throughput);
         println!("    Decode:        {:.2} tok/sec", pd.decode_throughput);
         println!("    Overall:       {:.2} tok/sec", stats.total_tokens_per_sec);
-        if stats.total_cached_tokens > 0 {
-            println!("    TPM:           {} (excl. cache: {})", format_tpm(stats.tpm), format_tpm(stats.tpm_no_cache));
-        } else {
-            println!("    TPM:           {}", format_tpm(stats.tpm));
-        }
+        println!("    TPM:           {} (excl. cache: {})", format_tpm(stats.tpm), format_tpm(stats.tpm_no_cache));
         println!();
         println!("  Prompt tokens:   {}", stats.total_prompt_tokens);
         println!("  Output tokens:   {}", stats.total_output_tokens);
@@ -185,17 +182,14 @@ impl Renderer {
     fn build_json(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize) -> JsonOutput {
         JsonOutput {
             backend: self.backend.clone(),
-            base_url: self.base_url.clone(),
             model: self.model.clone(),
             concurrent: self.concurrent,
-            duration: fmt_duration_go(self.duration_secs),
             mode: self.mode.clone(),
             prompt_tokens: self.prompt_tokens,
             output_tokens: self.output_tokens,
             no_cache: self.no_cache,
             seed: self.seed,
             prompt_stddev: self.prompt_stddev,
-            http_proxy: self.http_proxy.clone(),
             cache_rate: self.cache_rate,
             num_prefix_prompts: self.num_prefix_prompts,
             tag: self.tag.clone(),
@@ -217,7 +211,8 @@ impl Renderer {
             prefill_tokens_per_sec: pd.prefill_throughput,
             decode_tokens_per_sec: pd.decode_throughput,
             total_tokens_per_sec: stats.total_tokens_per_sec,
-            tpm: format_tpm(stats.tpm),
+            tpm: format_tpm(stats.tpm_no_cache),
+            tpm_cache: format_tpm(stats.tpm),
             total_prompt_tokens: stats.total_prompt_tokens,
             total_output_tokens: stats.total_output_tokens,
             total_cached_tokens: stats.total_cached_tokens,
