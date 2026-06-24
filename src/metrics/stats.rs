@@ -4,6 +4,7 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct Stats {
     pub total_requests: usize,
+    #[allow(dead_code)]
     pub total_duration: Duration,
     pub requests_per_sec: f64,
 
@@ -24,7 +25,9 @@ pub struct Stats {
     pub tpot_max: Duration,
 
     // Throughput
+    #[allow(dead_code)]
     pub prefill_tokens_per_sec: f64,
+    #[allow(dead_code)]
     pub decode_tokens_per_sec: f64,
     pub total_tokens_per_sec: f64,
     pub tpm: f64,
@@ -115,6 +118,7 @@ fn percentile(d: &mut [Duration], p: i32) -> Duration {
     d[idx.min(d.len() - 1)]
 }
 
+#[allow(dead_code)]
 fn mean(vals: &[f64]) -> f64 {
     if vals.is_empty() { 0.0 } else { vals.iter().sum::<f64>() / vals.len() as f64 }
 }

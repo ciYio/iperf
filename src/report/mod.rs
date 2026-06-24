@@ -2,7 +2,6 @@ use std::fs;
 use std::path::Path;
 
 use serde::Serialize;
-use tabled::{Table, Tabled};
 
 use crate::error::Result;
 use crate::metrics::stats::Stats;
@@ -26,23 +25,6 @@ pub struct Renderer {
     pub http_proxy: String,
     pub cache_rate: usize,
     pub num_prefix_prompts: usize,
-}
-
-#[derive(Tabled)]
-struct LatencyRow {
-    metric: String,
-    mean: String,
-    p50: String,
-    p90: String,
-    p95: String,
-    min: String,
-    max: String,
-}
-
-#[derive(Tabled)]
-struct ThroughputRow {
-    metric: String,
-    value: String,
 }
 
 /// JSON output matching Go project's jsonOutput structure

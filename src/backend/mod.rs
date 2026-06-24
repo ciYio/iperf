@@ -60,6 +60,7 @@ pub struct Response {
 
 #[async_trait]
 pub trait Backend: Send + Sync {
+    #[allow(dead_code)]
     fn name(&self) -> &str;
     async fn send(&self, req: Request) -> Result<Response>;
     async fn send_stream(

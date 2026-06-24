@@ -9,8 +9,11 @@ pub use stats::{Stats, calc_stats};
 #[derive(Debug, Clone)]
 pub struct Sample {
     pub ttft: Duration,
+    #[allow(dead_code)]
     pub prefill_dur: Duration,
+    #[allow(dead_code)]
     pub decode_dur: Duration,
+    #[allow(dead_code)]
     pub total_dur: Duration,
     pub prompt_tokens: usize,
     pub output_tokens: usize,
@@ -36,6 +39,7 @@ impl Collector {
         self.samples.lock().unwrap().clone()
     }
 
+    #[allow(dead_code)]
     pub fn count(&self) -> usize {
         self.samples.lock().unwrap().len()
     }

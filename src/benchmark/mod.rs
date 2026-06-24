@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use crate::backend::{Message, Request};
 
 // Re-export from runner for convenience
-pub use runner::{Runner, BenchResult};
+pub use runner::Runner;
 
 const CHARS_PER_TOKEN: usize = 4;
 

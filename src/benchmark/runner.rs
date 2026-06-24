@@ -26,9 +26,11 @@ pub struct Runner {
 pub struct BenchResult {
     pub stats: Stats,
     pub prefill_decode: PrefillDecodeSummary,
+    #[allow(dead_code)]
     pub samples: Vec<Sample>,
     pub errors: usize,
     pub total_requests: usize,
+    #[allow(dead_code)]
     pub wall_clock: Duration,
 }
 

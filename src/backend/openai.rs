@@ -11,6 +11,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(300); // 5 min
 
 pub struct OpenAIBackend {
     base_url: String,
+    #[allow(dead_code)]
     name: String,
     client: Client,
 }
@@ -29,6 +30,7 @@ impl OpenAIBackend {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_proxy(mut self, proxy_url: &str) -> Self {
         if !proxy_url.is_empty() {
             if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
