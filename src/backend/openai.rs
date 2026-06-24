@@ -1,0 +1,304 @@
+use std::time::{Duration, Instant};
+
+use async_trait::async_trait;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+
+use super::{Backend, Message, Request, Response, Timing};
+use crate::error::{AppError, Result};
+
+const HTTP_TIMEOUT: Duration = Duration::from_secs(300); // 5 min
+
+pub struct OpenAIBackend {
+    base_url: String,
+    name: String,
+    client: Client,
+}
+
+impl OpenAIBackend {
+    pub fn new(base_url: &str, name: &str) -> Self {
+        let client = Client::builder()
+            .timeout(HTTP_TIMEOUT)
+            .build()
+            .expect("failed to build HTTP client");
+
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            name: name.to_string(),
+            client,
+        }
+    }
+
+    pub fn with_proxy(mut self, proxy_url: &str) -> Self {
+        if !proxy_url.is_empty() {
+            if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+                self.client = Client::builder()
+                    .timeout(HTTP_TIMEOUT)
+                    .proxy(proxy)
+                    .build()
+                    .unwrap_or(self.client);
+            }
+        }
+        self
+    }
+
+    fn prepare_messages(req: &Request) -> Vec<Message> {
+        if req.no_cache && !req.messages.is_empty() {
+            let mut msgs = req.messages.clone();
+            msgs[0].content = format!("{} {}", uuid::Uuid::new_v4(), msgs[0].content);
+            msgs
+        } else {
+            req.messages.clone()
+        }
+    }
+}
+
+// --- JSON wire types ---
+
+#[derive(Serialize)]
+struct OpenAIRequest<'a> {
+    model: &'a str,
+    messages: &'a [Message],
+    max_tokens: usize,
+    temperature: f64,
+    stream: bool,
+}
+
+#[derive(Deserialize)]
+struct OpenAIResponse {
+    choices: Vec<ChoiceMsg>,
+    usage: Option<Usage>,
+}
+
+#[derive(Deserialize)]
+struct ChoiceMsg {
+    message: MsgContent,
+}
+
+#[derive(Deserialize)]
+struct MsgContent {
+    content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAIChunk {
+    choices: Vec<ChoiceDelta>,
+    usage: Option<Usage>,
+}
+
+#[derive(Deserialize)]
+struct ChoiceDelta {
+    delta: DeltaContent,
+    finish_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeltaContent {
+    content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Usage {
+    prompt_tokens: usize,
+    completion_tokens: usize,
+}
+
+#[async_trait]
+impl Backend for OpenAIBackend {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn send(&self, req: Request) -> Result<Response> {
+        let start = Instant::now();
+        let msgs = Self::prepare_messages(&req);
+
+        let body = OpenAIRequest {
+            model: &req.model,
+            messages: &msgs,
+            max_tokens: req.max_tokens,
+            temperature: req.temperature,
+            stream: false,
+        };
+
+        let url = format!("{}/chat/completions", self.base_url);
+        let resp = self.client.post(&url)
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::Backend(format!("HTTP {status}: {text}")));
+        }
+
+        let oresp: OpenAIResponse = resp.json().await?;
+        let total_dur = start.elapsed();
+
+        let (prompt_tokens, output_tokens) = match &oresp.usage {
+            Some(u) => (u.prompt_tokens, u.completion_tokens),
+            None => (0, 0),
+        };
+
+        let content = oresp.choices.first()
+            .map(|c| {
+                c.message.content.clone()
+                    .or_else(|| c.message.reasoning.clone())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+
+        Ok(Response {
+            content,
+            timing: Timing {
+                ttft: total_dur,
+                prefill_dur: total_dur,
+                decode_dur: Duration::ZERO,
+                total_dur,
+                prompt_tokens,
+                output_tokens,
+                tpot: Duration::ZERO,
+                token_timings: vec![],
+            },
+        })
+    }
+
+    async fn send_stream(
+        &self,
+        req: Request,
+        on_token: &mut (dyn FnMut(String, Duration) + Send),
+    ) -> Result<Response> {
+        use bytes::Buf;
+        use futures_util::StreamExt;
+
+        let start = Instant::now();
+        let msgs = Self::prepare_messages(&req);
+
+        let body = OpenAIRequest {
+            model: &req.model,
+            messages: &msgs,
+            max_tokens: req.max_tokens,
+            temperature: req.temperature,
+            stream: true,
+        };
+
+        let url = format!("{}/chat/completions", self.base_url);
+        let resp = self.client.post(&url)
+            .header("Accept", "text/event-stream")
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::Backend(format!("HTTP {status}: {text}")));
+        }
+
+        let mut stream = resp.bytes_stream();
+        let mut buf = Vec::new();
+        let mut content = String::new();
+        let mut token_count: usize = 0;
+        let mut first_token_at: Option<Duration> = None;
+        let mut last_token_at: Option<Duration> = None;
+        let mut token_timings: Vec<Duration> = Vec::new();
+        let mut server_prompt_tokens: usize = 0;
+        let mut server_output_tokens: usize = 0;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            buf.extend_from_slice(chunk.chunk());
+
+            // Process complete lines
+            while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n" || w == b"\r\n") {
+                // Find the actual line ending - scan for \n
+                let line_end = buf[..pos + 2].iter().position(|&b| b == b'\n').unwrap() + 1;
+                let line_bytes: Vec<u8> = buf.drain(..line_end).collect();
+                let line = String::from_utf8_lossy(&line_bytes);
+                let line = line.trim();
+
+                if !line.starts_with("data: ") {
+                    continue;
+                }
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    break;
+                }
+
+                let chunk: OpenAIChunk = match serde_json::from_str(data) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+
+                if chunk.choices.is_empty() {
+                    continue;
+                }
+
+                // Capture server usage (usually in final chunk)
+                if let Some(usage) = &chunk.usage {
+                    server_output_tokens = usage.completion_tokens;
+                    server_prompt_tokens = usage.prompt_tokens;
+                }
+
+                let delta_content = chunk.choices[0].delta.content.as_deref()
+                    .or(chunk.choices[0].delta.reasoning.as_deref())
+                    .unwrap_or("");
+
+                if delta_content.is_empty() {
+                    if chunk.choices[0].finish_reason.is_some() {
+                        break;
+                    }
+                    continue;
+                }
+
+                let now = start.elapsed();
+                if token_count == 0 {
+                    first_token_at = Some(now);
+                } else if let Some(last) = last_token_at {
+                    token_timings.push(now - last);
+                }
+
+                content.push_str(delta_content);
+                token_count += 1;
+
+                let inter_token_dur = if token_count > 1 {
+                    last_token_at.map(|l| now - l).unwrap_or(Duration::ZERO)
+                } else {
+                    Duration::ZERO
+                };
+                last_token_at = Some(now);
+
+                on_token(delta_content.to_string(), inter_token_dur);
+            }
+        }
+
+        let total_dur = start.elapsed();
+        let ttft = first_token_at.unwrap_or(total_dur);
+        let decode_dur = total_dur - ttft;
+        let tpot = if token_count > 1 {
+            decode_dur / (token_count - 1) as u32
+        } else {
+            Duration::ZERO
+        };
+        let output_tokens = if server_output_tokens > 0 { server_output_tokens } else { token_count };
+
+        Ok(Response {
+            content,
+            timing: Timing {
+                ttft,
+                prefill_dur: ttft,
+                decode_dur,
+                total_dur,
+                prompt_tokens: server_prompt_tokens,
+                output_tokens,
+                tpot,
+                token_timings,
+            },
+        })
+    }
+}

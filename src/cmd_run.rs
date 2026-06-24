@@ -1,0 +1,142 @@
+use std::path::Path;
+use std::sync::Arc;
+
+use crate::backend;
+use crate::benchmark::{PromptGenerator, Runner};
+use crate::cli::RunArgs;
+use crate::config::{Config, ConfigOverrides};
+use crate::report::Renderer;
+
+pub async fn run(args: RunArgs) -> anyhow::Result<()> {
+    // 1. Load config
+    let mut cfg = if let Some(ref conf_path) = args.conf {
+        Config::load_yaml(Path::new(conf_path))?
+    } else {
+        Config::default()
+    };
+
+    // 2. CLI overrides — only override when explicitly set by user
+    let overrides = ConfigOverrides {
+        backend: args.backend.clone(),
+        base_url: args.target.clone(),
+        model: args.model.clone(),
+        concurrent: args.concurrency,
+        duration_secs: args.duration.as_deref().map(parse_duration_secs).transpose()?,
+        request_count: args.request_count,
+        mode: args.mode.clone(),
+        prompt_tokens: args.prompt_tokens,
+        output_tokens: args.output_tokens,
+        no_cache: if args.no_cache { Some(true) } else { None },
+        format: args.format.clone(),
+        http_proxy: args.http_proxy.clone(),
+        trace: if args.trace { Some(true) } else { None },
+        warmup: args.warmup,
+    };
+    cfg.merge_overrides(&overrides);
+
+    if cfg.model.is_empty() {
+        anyhow::bail!("--model is required");
+    }
+
+    // 3. Create backend
+    let backend_inst = backend::new_backend(&cfg.backend, &cfg.base_url)?;
+    let backend_arc: Arc<dyn backend::Backend> = Arc::from(backend_inst);
+
+    // 4. Create prompt generator
+    let prompt_gen = PromptGenerator::new(
+        cfg.prompt_tokens,
+        cfg.seed as u64,
+        cfg.prompt_stddev,
+        cfg.num_prefix_prompts,
+    );
+
+    // 5. Trace mode
+    if cfg.trace {
+        eprintln!("[trace] Sending test request to {}...", cfg.base_url);
+        let prompt = prompt_gen.next();
+        let req = crate::benchmark::new_benchmark_request(&cfg.model, &prompt, cfg.output_tokens);
+        match backend_arc.send(req).await {
+            Ok(resp) => {
+                let snippet = &resp.content[..resp.content.len().min(200)];
+                eprintln!("[trace] Response: {snippet}...");
+            }
+            Err(e) => eprintln!("[trace] Error: {e}"),
+        }
+    }
+
+    // 6. Run benchmark
+    eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, duration={}s)",
+        cfg.model, cfg.backend, cfg.mode, cfg.concurrent, cfg.duration_secs);
+
+    let runner = Runner {
+        backend: backend_arc,
+        model: cfg.model.clone(),
+        concurrent: cfg.concurrent,
+        duration: cfg.duration(),
+        request_count: cfg.request_count,
+        mode: cfg.mode.clone(),
+        max_tokens: cfg.output_tokens,
+        no_cache: cfg.no_cache,
+        warmup: cfg.warmup,
+        trace: cfg.trace,
+    };
+
+    let result = runner.run(&prompt_gen).await?;
+
+    // 7. Render results
+    let renderer = Renderer {
+        format: cfg.format.clone(),
+        output_dir: cfg.output_dir.clone(),
+        model: cfg.model.clone(),
+        backend: cfg.backend.clone(),
+        base_url: cfg.base_url.clone(),
+        concurrent: cfg.concurrent,
+        mode: cfg.mode.clone(),
+        tag: cfg.tag.clone(),
+        prompt_tokens: cfg.prompt_tokens,
+        output_tokens: cfg.output_tokens,
+        duration_secs: cfg.duration_secs,
+        no_cache: cfg.no_cache,
+        seed: cfg.seed,
+        prompt_stddev: cfg.prompt_stddev,
+        http_proxy: cfg.http_proxy.clone(),
+        cache_rate: cfg.cache_rate,
+        num_prefix_prompts: cfg.num_prefix_prompts,
+    };
+
+    renderer.render(
+        &result.stats,
+        &result.prefill_decode,
+        result.errors,
+        result.total_requests,
+    )?;
+    renderer.render_jsonl(
+        &result.stats,
+        &result.prefill_decode,
+        result.errors,
+        result.total_requests,
+    )?;
+
+    Ok(())
+}
+
+pub fn parse_duration_secs(s: &str) -> anyhow::Result<u64> {
+    let s = s.trim();
+    if s.is_empty() {
+        anyhow::bail!("empty duration");
+    }
+
+    let (num_str, multiplier) = if let Some(n) = s.strip_suffix('s') {
+        (n, 1u64)
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, 60)
+    } else if let Some(n) = s.strip_suffix('h') {
+        (n, 3600)
+    } else {
+        (s, 1u64)
+    };
+
+    let num: u64 = num_str.parse()
+        .map_err(|_| crate::error::AppError::InvalidDuration(s.to_string()))?;
+    Ok(num * multiplier)
+}
