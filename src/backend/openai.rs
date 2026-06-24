@@ -58,12 +58,19 @@ impl OpenAIBackend {
 // --- JSON wire types ---
 
 #[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
+#[derive(Serialize)]
 struct OpenAIRequest<'a> {
     model: &'a str,
     messages: &'a [Message],
     max_tokens: usize,
     temperature: f64,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
 }
 
 #[derive(Deserialize)]
@@ -135,6 +142,7 @@ impl Backend for OpenAIBackend {
             max_tokens: req.max_tokens,
             temperature: req.temperature,
             stream: false,
+            stream_options: None,
         };
 
         let url = format!("{}/chat/completions", self.base_url);
@@ -202,6 +210,7 @@ impl Backend for OpenAIBackend {
             max_tokens: req.max_tokens,
             temperature: req.temperature,
             stream: true,
+            stream_options: Some(StreamOptions { include_usage: true }),
         };
 
         let url = format!("{}/chat/completions", self.base_url);
@@ -253,15 +262,15 @@ impl Backend for OpenAIBackend {
                     Err(_) => continue,
                 };
 
-                if chunk.choices.is_empty() {
-                    continue;
-                }
-
-                // Capture server usage (usually in final chunk)
+                // Capture server usage (usually in final chunk with empty choices)
                 if let Some(usage) = &chunk.usage {
                     server_output_tokens = usage.completion_tokens;
                     server_prompt_tokens = usage.prompt_tokens;
                     server_cached_tokens = usage.prompt_tokens_details.as_ref().map(|d| d.cached_tokens).unwrap_or(0);
+                }
+
+                if chunk.choices.is_empty() {
+                    continue;
                 }
 
                 let delta_content = chunk.choices[0].delta.content.as_deref()
