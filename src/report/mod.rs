@@ -84,6 +84,8 @@ struct JsonOutput {
     // Token counts
     total_prompt_tokens: usize,
     total_output_tokens: usize,
+    total_cached_tokens: usize,
+    cache_hit_rate: f64,
 }
 
 fn is_zero(v: &usize) -> bool { *v == 0 }
@@ -168,6 +170,9 @@ impl Renderer {
         println!();
         println!("  Prompt tokens:   {}", stats.total_prompt_tokens);
         println!("  Output tokens:   {}", stats.total_output_tokens);
+        if stats.total_cached_tokens > 0 {
+            println!("  Cached tokens:   {} ({:.1}%)", stats.total_cached_tokens, stats.cache_hit_rate * 100.0);
+        }
         println!("  Errors:          {errors}");
         println!();
         Ok(())
@@ -211,6 +216,8 @@ impl Renderer {
             tpm: format_tpm(stats.tpm),
             total_prompt_tokens: stats.total_prompt_tokens,
             total_output_tokens: stats.total_output_tokens,
+            total_cached_tokens: stats.total_cached_tokens,
+            cache_hit_rate: stats.cache_hit_rate,
         }
     }
 

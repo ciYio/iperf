@@ -103,10 +103,20 @@ struct DeltaContent {
     reasoning: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Default)]
+struct PromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: usize,
+}
+
+#[derive(Deserialize, Debug, Default)]
 struct Usage {
+    #[serde(default)]
     prompt_tokens: usize,
+    #[serde(default)]
     completion_tokens: usize,
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptTokensDetails>,
 }
 
 #[async_trait]
@@ -142,9 +152,13 @@ impl Backend for OpenAIBackend {
         let oresp: OpenAIResponse = resp.json().await?;
         let total_dur = start.elapsed();
 
-        let (prompt_tokens, output_tokens) = match &oresp.usage {
-            Some(u) => (u.prompt_tokens, u.completion_tokens),
-            None => (0, 0),
+        let (prompt_tokens, output_tokens, cached_tokens) = match &oresp.usage {
+            Some(u) => (
+                u.prompt_tokens,
+                u.completion_tokens,
+                u.prompt_tokens_details.as_ref().map(|d| d.cached_tokens).unwrap_or(0),
+            ),
+            None => (0, 0, 0),
         };
 
         let content = oresp.choices.first()
@@ -160,11 +174,12 @@ impl Backend for OpenAIBackend {
             timing: Timing {
                 ttft: total_dur,
                 prefill_dur: total_dur,
-                decode_dur: Duration::ZERO,
+                decode_dur: total_dur,  // 非 stream 模式：decode 时间 = 总时间（包含 prefill）
                 total_dur,
                 prompt_tokens,
                 output_tokens,
-                tpot: Duration::ZERO,
+                cached_tokens,
+                tpot: if output_tokens > 0 { total_dur / output_tokens as u32 } else { Duration::ZERO },
                 token_timings: vec![],
             },
         })
@@ -211,6 +226,7 @@ impl Backend for OpenAIBackend {
         let mut token_timings: Vec<Duration> = Vec::new();
         let mut server_prompt_tokens: usize = 0;
         let mut server_output_tokens: usize = 0;
+        let mut server_cached_tokens: usize = 0;
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
@@ -245,6 +261,7 @@ impl Backend for OpenAIBackend {
                 if let Some(usage) = &chunk.usage {
                     server_output_tokens = usage.completion_tokens;
                     server_prompt_tokens = usage.prompt_tokens;
+                    server_cached_tokens = usage.prompt_tokens_details.as_ref().map(|d| d.cached_tokens).unwrap_or(0);
                 }
 
                 let delta_content = chunk.choices[0].delta.content.as_deref()
@@ -298,6 +315,7 @@ impl Backend for OpenAIBackend {
                 total_dur,
                 prompt_tokens: server_prompt_tokens,
                 output_tokens,
+                cached_tokens: server_cached_tokens,
                 tpot,
                 token_timings,
             },

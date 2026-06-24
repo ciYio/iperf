@@ -18,6 +18,7 @@ pub struct Timing {
     pub total_dur: Duration,
     pub prompt_tokens: usize,
     pub output_tokens: usize,
+    pub cached_tokens: usize,
     pub tpot: Duration,
     pub token_timings: Vec<Duration>,
 }
@@ -31,6 +32,7 @@ impl Timing {
             total_dur: self.total_dur,
             prompt_tokens: self.prompt_tokens,
             output_tokens: self.output_tokens,
+            cached_tokens: self.cached_tokens,
             tpot: self.tpot,
             token_timings: self.token_timings.clone(),
         }

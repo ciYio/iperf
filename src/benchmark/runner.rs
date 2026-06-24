@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use indicatif::{ProgressBar, ProgressStyle};
 use tokio::time::interval;
 
 use crate::backend::Backend;
@@ -49,13 +50,31 @@ impl Runner {
         // Spawn progress reporter
         let progress_total = total_count.clone();
         let progress_err = error_count.clone();
+        let progress_request_count = request_count;
         let progress_handle = tokio::spawn(async move {
+            let pb = if progress_request_count > 0 {
+                let pb = ProgressBar::new((progress_request_count + warmup) as u64);
+                pb.set_style(ProgressStyle::default_bar()
+                    .template("  [{bar:30}] {pos}/{len} requests, {msg}")
+                    .unwrap()
+                    .progress_chars("=>-"));
+                Some(pb)
+            } else {
+                None
+            };
+
             let mut ticker = interval(Duration::from_secs(1));
             loop {
                 ticker.tick().await;
                 let done = progress_total.load(Ordering::Relaxed);
                 let errs = progress_err.load(Ordering::Relaxed);
-                eprint!("\r  [{done} requests, {errs} errors]");
+
+                if let Some(ref pb) = pb {
+                    pb.set_position(done as u64);
+                    pb.set_message(format!("{errs} errors"));
+                } else {
+                    eprint!("\r  [{done} requests, {errs} errors]");
+                }
             }
         });
 

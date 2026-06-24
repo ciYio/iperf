@@ -17,6 +17,7 @@ pub struct Sample {
     pub total_dur: Duration,
     pub prompt_tokens: usize,
     pub output_tokens: usize,
+    pub cached_tokens: usize,
     pub tpot: Duration,
     pub token_timings: Vec<Duration>,
 }

@@ -35,6 +35,8 @@ pub struct Stats {
     // Token counts
     pub total_prompt_tokens: usize,
     pub total_output_tokens: usize,
+    pub total_cached_tokens: usize,
+    pub cache_hit_rate: f64,  // cached_tokens / prompt_tokens
 }
 
 impl Stats {
@@ -52,6 +54,8 @@ impl Stats {
             prefill_tokens_per_sec: 0.0, decode_tokens_per_sec: 0.0,
             total_tokens_per_sec: 0.0, tpm: 0.0,
             total_prompt_tokens: 0, total_output_tokens: 0,
+            total_cached_tokens: 0,
+            cache_hit_rate: 0.0,
         }
     }
 }
@@ -83,6 +87,7 @@ pub fn calc_stats(samples: &[Sample], wall_clock: Duration) -> Stats {
 
     let total_prompt: usize = samples.iter().map(|s| s.prompt_tokens).sum();
     let total_output: usize = samples.iter().map(|s| s.output_tokens).sum();
+    let total_cached: usize = samples.iter().map(|s| s.cached_tokens).sum();
 
     let wall_secs = wall_clock.as_secs_f64();
 
@@ -108,6 +113,8 @@ pub fn calc_stats(samples: &[Sample], wall_clock: Duration) -> Stats {
         tpm: safe_div((total_prompt + total_output) as f64 * 60.0, wall_secs),
         total_prompt_tokens: total_prompt,
         total_output_tokens: total_output,
+        total_cached_tokens: total_cached,
+        cache_hit_rate: if total_prompt > 0 { total_cached as f64 / total_prompt as f64 } else { 0.0 },
     }
 }
 
@@ -147,6 +154,7 @@ mod tests {
                 total_dur: Duration::from_millis(250),
                 prompt_tokens: 100,
                 output_tokens: 50,
+                cached_tokens: 20,
                 tpot: Duration::from_millis(4),
                 token_timings: vec![Duration::from_millis(4), Duration::from_millis(5)],
             },
@@ -157,6 +165,7 @@ mod tests {
                 total_dur: Duration::from_millis(180),
                 prompt_tokens: 80,
                 output_tokens: 40,
+                cached_tokens: 10,
                 tpot: Duration::from_millis(3),
                 token_timings: vec![Duration::from_millis(3), Duration::from_millis(4)],
             },
@@ -165,6 +174,8 @@ mod tests {
         assert_eq!(stats.total_requests, 2);
         assert_eq!(stats.total_prompt_tokens, 180);
         assert_eq!(stats.total_output_tokens, 90);
+        assert_eq!(stats.total_cached_tokens, 30);
+        assert!((stats.cache_hit_rate - 0.1667).abs() < 0.001);  // 30/180 ≈ 0.1667
         assert!(stats.requests_per_sec > 0.0);
         assert_eq!(stats.ttft_p50, Duration::from_millis(30));
         assert_eq!(stats.ttft_p95, Duration::from_millis(50));
