@@ -11,6 +11,8 @@ AI 推理后端性能基准测试工具。通过 OpenAI 兼容 API 对 vLLM、SG
 - **多种输出** — Table / JSON / JSONL
 - **模型管理** — HuggingFace 下载（断点续传）+ HTTP 文件服务
 - **精确指标** — per-token TPOT 百分位，非 per-request 平均
+- **Cache 命中率统计** — 自动统计 prompt cache 命中率（需后端支持）
+- **进度条** — request-count 模式下显示可视化进度条
 
 ## 安装
 
@@ -166,6 +168,7 @@ IPERF Benchmark Results
 
   Prompt tokens:   5376
   Output tokens:   2688
+  Cached tokens:   4800 (89.3%)
   Errors:          0
 ```
 
@@ -179,6 +182,29 @@ IPERF Benchmark Results
 | **Decode tok/s** | 输出吞吐量 = total_output_tokens / wall_clock |
 | **TPM** | Tokens Per Minute |
 | **Req/s** | 每秒请求数 |
+| **Cached tokens** | 缓存命中的 prompt tokens 数及命中率百分比 |
+
+### Cache 命中率
+
+当后端支持 prompt caching（如 vLLM 的 `--enable-prefix-caching`）时，iperf 会自动统计 cache 命中率：
+
+- **Stream 模式**：通过 `stream_options: {"include_usage": true}` 获取 usage 信息
+- **非 Stream 模式**：直接从响应的 `usage.prompt_tokens_details.cached_tokens` 获取
+- **统计方式**：累加所有请求的 `cached_tokens` 和 `prompt_tokens`，计算总命中率
+
+测试 cache 命中率时，建议使用 `--num-prefix-prompts 1` 让所有请求使用相同 prompt：
+
+```bash
+iperf run -m "model-name" --request-count 100 --num-prefix-prompts 1 http://localhost:8000/v1
+```
+
+### 进度条
+
+当使用 `--request-count` 时，会显示可视化进度条：
+
+```
+  [==================>         ] 15/20 requests, 0 errors
+```
 
 ### JSONL 输出
 

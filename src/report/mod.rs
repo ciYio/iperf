@@ -166,7 +166,11 @@ impl Renderer {
         println!("    Prefill:       {:.2} tok/sec", pd.prefill_throughput);
         println!("    Decode:        {:.2} tok/sec", pd.decode_throughput);
         println!("    Overall:       {:.2} tok/sec", stats.total_tokens_per_sec);
-        println!("    TPM:           {}", format_tpm(stats.tpm));
+        if stats.total_cached_tokens > 0 {
+            println!("    TPM:           {} (excl. cache: {})", format_tpm(stats.tpm), format_tpm(stats.tpm_no_cache));
+        } else {
+            println!("    TPM:           {}", format_tpm(stats.tpm));
+        }
         println!();
         println!("  Prompt tokens:   {}", stats.total_prompt_tokens);
         println!("  Output tokens:   {}", stats.total_output_tokens);

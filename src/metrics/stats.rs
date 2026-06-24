@@ -31,6 +31,7 @@ pub struct Stats {
     pub decode_tokens_per_sec: f64,
     pub total_tokens_per_sec: f64,
     pub tpm: f64,
+    pub tpm_no_cache: f64,  // TPM excluding cached tokens
 
     // Token counts
     pub total_prompt_tokens: usize,
@@ -52,7 +53,7 @@ impl Stats {
             tpot_p90: Duration::ZERO, tpot_p95: Duration::ZERO,
             tpot_min: Duration::ZERO, tpot_max: Duration::ZERO,
             prefill_tokens_per_sec: 0.0, decode_tokens_per_sec: 0.0,
-            total_tokens_per_sec: 0.0, tpm: 0.0,
+            total_tokens_per_sec: 0.0, tpm: 0.0, tpm_no_cache: 0.0,
             total_prompt_tokens: 0, total_output_tokens: 0,
             total_cached_tokens: 0,
             cache_hit_rate: 0.0,
@@ -111,6 +112,7 @@ pub fn calc_stats(samples: &[Sample], wall_clock: Duration) -> Stats {
         decode_tokens_per_sec: safe_div(total_output as f64, wall_secs),
         total_tokens_per_sec: safe_div((total_prompt + total_output) as f64, wall_secs),
         tpm: safe_div((total_prompt + total_output) as f64 * 60.0, wall_secs),
+        tpm_no_cache: safe_div((total_prompt - total_cached + total_output) as f64 * 60.0, wall_secs),
         total_prompt_tokens: total_prompt,
         total_output_tokens: total_output,
         total_cached_tokens: total_cached,
