@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::time::interval;
+use tokio_util::sync::CancellationToken;
 
 use crate::backend::Backend;
 use crate::metrics::{calc_prefill_decode, calc_stats, Collector, PrefillDecodeSummary, Sample, Stats};
@@ -20,8 +21,8 @@ pub struct Runner {
     pub mode: String,         // "single" | "stream" | "continuous"
     pub max_tokens: usize,
     pub no_cache: bool,
-    pub warmup: usize,
     pub trace: bool,
+    pub cancel: CancellationToken,
 }
 
 pub struct BenchResult {
@@ -39,21 +40,21 @@ impl Runner {
     pub async fn run(&self, prompt_gen: &PromptGenerator) -> Result<BenchResult> {
         let collector = Arc::new(Collector::new());
         let error_count = Arc::new(AtomicUsize::new(0));
-        let total_count = Arc::new(AtomicUsize::new(0));
-        let warmup_remaining = Arc::new(AtomicUsize::new(self.warmup));
+        let total_count = Arc::new(AtomicUsize::new(0)); // 用于领取请求编号
+        let completed_count = Arc::new(AtomicUsize::new(0)); // 用于进度条显示
         let deadline = Instant::now() + self.duration;
         let request_count = self.request_count;
-        let warmup = self.warmup;
+        let cancel = self.cancel.clone();
 
         let wall_start = Instant::now();
 
         // Spawn progress reporter
-        let progress_total = total_count.clone();
+        let progress_total = completed_count.clone();
         let progress_err = error_count.clone();
         let progress_request_count = request_count;
         let progress_handle = tokio::spawn(async move {
             let pb = if progress_request_count > 0 {
-                let pb = ProgressBar::new((progress_request_count + warmup) as u64);
+                let pb = ProgressBar::new(progress_request_count as u64);
                 pb.set_style(ProgressStyle::default_bar()
                     .template("  [{bar:30}] {pos}/{len} requests, {msg}")
                     .unwrap()
@@ -90,30 +91,40 @@ impl Runner {
             let collector = collector.clone();
             let error_count = error_count.clone();
             let total_count = total_count.clone();
-            let warmup_remaining = warmup_remaining.clone();
+            let completed_count = completed_count.clone();
             let prompt_gen = prompt_gen.clone();
+            let cancel = cancel.clone();
 
             let handle = tokio::spawn(async move {
                 loop {
-                    if request_count > 0 {
-                        // request_count mode: ignore duration, stop only when count reached
-                        if total_count.load(Ordering::Relaxed) >= request_count + warmup {
+                    // Check cancellation first
+                    if cancel.is_cancelled() {
+                        break;
+                    }
+
+                    // Atomically claim a request slot
+                    let req_num = if request_count > 0 {
+                        // request_count mode: atomically increment and check
+                        let num = total_count.fetch_add(1, Ordering::Relaxed) + 1;
+                        if num > request_count {
+                            // Rolled back: we exceeded the limit
+                            total_count.fetch_sub(1, Ordering::Relaxed);
                             break;
                         }
+                        num
                     } else {
-                        // duration mode: stop when deadline reached
+                        // duration mode: check deadline before claiming
                         if Instant::now() >= deadline {
                             break;
                         }
-                    }
+                        total_count.fetch_add(1, Ordering::Relaxed) + 1
+                    };
 
                     let prompt = prompt_gen.next();
                     let prompt_char_len = prompt.len();
 
                     let mut req = new_benchmark_request(&model, &prompt, max_tokens);
                     req.no_cache = no_cache;
-
-                    let is_warmup = warmup_remaining.load(Ordering::Relaxed) > 0;
 
                     let result = match mode.as_str() {
                         "stream" => {
@@ -125,39 +136,61 @@ impl Runner {
                         }
                     };
 
-                    total_count.fetch_add(1, Ordering::Relaxed);
-
                     match result {
                         Ok(mut resp) => {
                             // Estimate prompt_tokens if server didn't return usage
                             if resp.timing.prompt_tokens == 0 {
                                 resp.timing.prompt_tokens = prompt_char_len / 4; // ~4 chars per token
                             }
-                            if !is_warmup {
-                                collector.add(resp.timing.to_sample());
-                            } else {
-                                warmup_remaining.fetch_sub(1, Ordering::Relaxed);
+                            // Trace: show details for first 5 requests
+                            if trace && req_num <= 5 {
+                                eprintln!(
+                                    "[trace] req#{} prompt_len={} prompt_tokens={} cached_tokens={} cache_rate={:.1}%",
+                                    req_num,
+                                    prompt_char_len,
+                                    resp.timing.prompt_tokens,
+                                    resp.timing.cached_tokens,
+                                    if resp.timing.prompt_tokens > 0 {
+                                        resp.timing.cached_tokens as f64 / resp.timing.prompt_tokens as f64 * 100.0
+                                    } else { 0.0 }
+                                );
                             }
-                            if trace && total_count.load(Ordering::Relaxed) == 1 {
+                            collector.add(resp.timing.to_sample());
+                            if trace && req_num == 1 {
                                 let snippet = &resp.content[..resp.content.len().min(100)];
-                                eprintln!("\n[trace] First response: {snippet}");
+                                eprintln!("[trace] First response: {snippet}");
                             }
                         }
                         Err(e) => {
                             error_count.fetch_add(1, Ordering::Relaxed);
                             if trace {
-                                eprintln!("\n[trace] Error: {e}");
+                                eprintln!("[trace] Error: {e}");
                             }
                         }
                     }
+
+                    // Mark request as completed (for progress bar)
+                    completed_count.fetch_add(1, Ordering::Relaxed);
                 }
             });
             handles.push(handle);
         }
 
-        // Wait for all workers
-        for h in handles {
-            let _ = h.await;
+        // Wait for all workers (with timeout if cancelled)
+        if cancel.is_cancelled() {
+            // Grace period: wait up to 5 seconds for in-flight requests
+            let wait_all = async {
+                for h in handles {
+                    let _ = h.await;
+                }
+            };
+            if tokio::time::timeout(Duration::from_secs(5), wait_all).await.is_err() {
+                eprintln!("  Grace period expired, some in-flight requests were aborted.");
+            }
+        } else {
+            for h in handles {
+                let _ = h.await;
+            }
         }
 
         progress_handle.abort();

@@ -28,6 +28,7 @@ pub struct Renderer {
     pub http_proxy: String,
     pub cache_rate: usize,
     pub num_prefix_prompts: usize,
+    pub interrupted: bool,
 }
 
 /// JSON output matching Go project's jsonOutput structure
@@ -52,6 +53,8 @@ struct JsonOutput {
     num_prefix_prompts: usize,
     #[serde(skip_serializing_if = "String::is_empty")]
     tag: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    interrupted: bool,
 
     // Results
     total_requests: usize,
@@ -79,7 +82,7 @@ struct JsonOutput {
     decode_tokens_per_sec: f64,
     total_tokens_per_sec: f64,
     tpm: String,
-    tpm_cache: String,
+    tpm_no_cache: String,
 
     // Token counts
     total_prompt_tokens: usize,
@@ -142,7 +145,11 @@ impl Renderer {
 
     fn render_table(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize) -> Result<()> {
         println!();
-        println!("IPERF Benchmark Results");
+        if self.interrupted {
+            println!("IPERF Benchmark Results (interrupted)");
+        } else {
+            println!("IPERF Benchmark Results");
+        }
         println!();
         println!("  Requests:        {}/{} (success/total)", stats.total_requests, total);
         println!("  Throughput:      {:.2} req/sec", stats.requests_per_sec);
@@ -193,6 +200,7 @@ impl Renderer {
             cache_rate: self.cache_rate,
             num_prefix_prompts: self.num_prefix_prompts,
             tag: self.tag.clone(),
+            interrupted: self.interrupted,
             total_requests: total,
             errors,
             requests_per_sec: stats.requests_per_sec,
@@ -211,8 +219,8 @@ impl Renderer {
             prefill_tokens_per_sec: pd.prefill_throughput,
             decode_tokens_per_sec: pd.decode_throughput,
             total_tokens_per_sec: stats.total_tokens_per_sec,
-            tpm: format_tpm(stats.tpm_no_cache),
-            tpm_cache: format_tpm(stats.tpm),
+            tpm: format_tpm(stats.tpm),              // 包含 cache 的 TPM
+            tpm_no_cache: format_tpm(stats.tpm_no_cache),  // 排除 cache 的 TPM
             total_prompt_tokens: stats.total_prompt_tokens,
             total_output_tokens: stats.total_output_tokens,
             total_cached_tokens: stats.total_cached_tokens,

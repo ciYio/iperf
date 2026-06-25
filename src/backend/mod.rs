@@ -70,6 +70,10 @@ pub trait Backend: Send + Sync {
         req: Request,
         on_token: &mut (dyn FnMut(String, Duration) + Send),
     ) -> Result<Response>;
+    /// Apply proxy settings, return new backend if supported
+    fn with_proxy_opt(&self, _proxy: &str) -> Option<Box<dyn Backend>> {
+        None
+    }
 }
 
 // --- Registry ---
@@ -83,10 +87,17 @@ pub fn register(name: &str, ctor: impl Fn(&str) -> Box<dyn Backend> + Send + Syn
     REGISTRY.lock().unwrap().insert(name.to_string(), Box::new(ctor));
 }
 
-pub fn new_backend(name: &str, base_url: &str) -> Result<Box<dyn Backend>> {
+pub fn new_backend(name: &str, base_url: &str, http_proxy: &str) -> Result<Box<dyn Backend>> {
     let registry = REGISTRY.lock().unwrap();
     let ctor = registry.get(name).ok_or_else(|| AppError::UnknownBackend(name.to_string()))?;
-    Ok(ctor(base_url))
+    let backend = ctor(base_url);
+    // Apply proxy if supported
+    if !http_proxy.is_empty() {
+        if let Some(backend_with_proxy) = backend.with_proxy_opt(http_proxy) {
+            return Ok(backend_with_proxy);
+        }
+    }
+    Ok(backend)
 }
 
 pub fn init_backends() {
@@ -101,8 +112,8 @@ mod tests {
     #[test]
     fn test_registry() {
         init_backends();
-        assert!(new_backend("vllm", "http://localhost:8000/v1").is_ok());
-        assert!(new_backend("sglang", "http://localhost:8000/v1").is_ok());
-        assert!(new_backend("unknown", "http://localhost:8000/v1").is_err());
+        assert!(new_backend("vllm", "http://localhost:8000/v1", "").is_ok());
+        assert!(new_backend("sglang", "http://localhost:8000/v1", "").is_ok());
+        assert!(new_backend("unknown", "http://localhost:8000/v1", "").is_err());
     }
 }

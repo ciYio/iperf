@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use tokio_util::sync::CancellationToken;
+
 use crate::backend;
 use crate::benchmark::{PromptGenerator, Runner};
 use crate::cli::RunArgs;
@@ -20,7 +22,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         backend: args.backend.clone(),
         base_url: args.target.clone(),
         model: args.model.clone(),
-        concurrent: args.concurrency,
+        concurrency: args.concurrency,
         duration_secs: args.duration.as_deref().map(parse_duration_secs).transpose()?,
         request_count: args.request_count,
         mode: args.mode.clone(),
@@ -36,7 +38,6 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         http_proxy: args.http_proxy.clone(),
         trace: if args.trace { Some(true) } else { None },
         tag: args.tag.clone(),
-        warmup: args.warmup,
     };
     cfg.merge_overrides(&overrides);
 
@@ -45,7 +46,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     }
 
     // 3. Create backend
-    let backend_inst = backend::new_backend(&cfg.backend, &cfg.base_url)?;
+    let backend_inst = backend::new_backend(&cfg.backend, &cfg.base_url, &cfg.http_proxy)?;
     let backend_arc: Arc<dyn backend::Backend> = Arc::from(backend_inst);
 
     // 4. Create prompt generator
@@ -70,24 +71,43 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         }
     }
 
-    // 6. Run benchmark
-    eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, duration={}s)",
-        cfg.model, cfg.backend, cfg.mode, cfg.concurrent, cfg.duration_secs);
+    // 6. Set up cancellation token for graceful shutdown
+    let cancel = CancellationToken::new();
+
+    // Set up SIGINT handler
+    let cancel_for_signal = cancel.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            eprintln!("\n  Interrupted! Finishing current requests and collecting stats...");
+            cancel_for_signal.cancel();
+        }
+    });
+
+    // 7. Run benchmark
+    if cfg.request_count > 0 {
+        eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, requests={})",
+            cfg.model, cfg.backend, cfg.mode, cfg.concurrency, cfg.request_count);
+    } else {
+        eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, duration={}s)",
+            cfg.model, cfg.backend, cfg.mode, cfg.concurrency, cfg.duration_secs);
+    }
 
     let runner = Runner {
         backend: backend_arc,
         model: cfg.model.clone(),
-        concurrent: cfg.concurrent,
+        concurrent: cfg.concurrency,
         duration: cfg.duration(),
         request_count: cfg.request_count,
         mode: cfg.mode.clone(),
         max_tokens: cfg.output_tokens,
         no_cache: cfg.no_cache,
-        warmup: cfg.warmup,
         trace: cfg.trace,
+        cancel: cancel.clone(),
     };
 
     let result = runner.run(&prompt_gen).await?;
+
+    let interrupted = cancel.is_cancelled();
 
     // 7. Render results
     let renderer = Renderer {
@@ -96,7 +116,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         model: cfg.model.clone(),
         backend: cfg.backend.clone(),
         base_url: cfg.base_url.clone(),
-        concurrent: cfg.concurrent,
+        concurrent: cfg.concurrency,
         mode: cfg.mode.clone(),
         tag: cfg.tag.clone(),
         prompt_tokens: cfg.prompt_tokens,
@@ -108,6 +128,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         http_proxy: cfg.http_proxy.clone(),
         cache_rate: cfg.cache_rate,
         num_prefix_prompts: cfg.num_prefix_prompts,
+        interrupted,
     };
 
     renderer.render(

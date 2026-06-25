@@ -19,6 +19,7 @@ pub struct OpenAIBackend {
 impl OpenAIBackend {
     pub fn new(base_url: &str, name: &str) -> Self {
         let client = Client::builder()
+            .http1_only()
             .timeout(HTTP_TIMEOUT)
             .build()
             .expect("failed to build HTTP client");
@@ -30,11 +31,11 @@ impl OpenAIBackend {
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_proxy(mut self, proxy_url: &str) -> Self {
         if !proxy_url.is_empty() {
             if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
                 self.client = Client::builder()
+                    .http1_only()
                     .timeout(HTTP_TIMEOUT)
                     .proxy(proxy)
                     .build()
@@ -130,6 +131,15 @@ struct Usage {
 impl Backend for OpenAIBackend {
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn with_proxy_opt(&self, proxy: &str) -> Option<Box<dyn Backend>> {
+        let new_self = OpenAIBackend {
+            base_url: self.base_url.clone(),
+            name: self.name.clone(),
+            client: self.client.clone(),
+        }.with_proxy(proxy);
+        Some(Box::new(new_self))
     }
 
     async fn send(&self, req: Request) -> Result<Response> {
@@ -236,6 +246,8 @@ impl Backend for OpenAIBackend {
         let mut server_prompt_tokens: usize = 0;
         let mut server_output_tokens: usize = 0;
         let mut server_cached_tokens: usize = 0;
+        let mut usage_seen = false;
+        let mut done = false; // set after finish_reason, break on next iteration
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
@@ -243,6 +255,11 @@ impl Backend for OpenAIBackend {
 
             // Process complete lines
             while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n" || w == b"\r\n") {
+                // If we already saw finish_reason, break after processing one more chunk
+                if done {
+                    break;
+                }
+
                 // Find the actual line ending - scan for \n
                 let line_end = buf[..pos + 2].iter().position(|&b| b == b'\n').unwrap() + 1;
                 let line_bytes: Vec<u8> = buf.drain(..line_end).collect();
@@ -267,9 +284,13 @@ impl Backend for OpenAIBackend {
                     server_output_tokens = usage.completion_tokens;
                     server_prompt_tokens = usage.prompt_tokens;
                     server_cached_tokens = usage.prompt_tokens_details.as_ref().map(|d| d.cached_tokens).unwrap_or(0);
+                    usage_seen = true;
                 }
 
                 if chunk.choices.is_empty() {
+                    if usage_seen {
+                        break; // got usage, done
+                    }
                     continue;
                 }
 
@@ -279,7 +300,12 @@ impl Backend for OpenAIBackend {
 
                 if delta_content.is_empty() {
                     if chunk.choices[0].finish_reason.is_some() {
-                        break;
+                        // Signal that we should break after one more iteration
+                        // (to capture usage if it comes in the next chunk)
+                        done = true;
+                        if usage_seen {
+                            break;
+                        }
                     }
                     continue;
                 }

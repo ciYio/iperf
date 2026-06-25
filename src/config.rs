@@ -11,8 +11,8 @@ pub struct Config {
     pub base_url: String,
     #[serde(default)]
     pub model: String,
-    #[serde(default = "default_concurrent")]
-    pub concurrent: usize,
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
     #[serde(default = "default_duration_secs")]
     pub duration_secs: u64,
     #[serde(default)]
@@ -43,13 +43,11 @@ pub struct Config {
     pub http_proxy: String,
     #[serde(default)]
     pub trace: bool,
-    #[serde(default)]
-    pub warmup: usize,
 }
 
 fn default_backend() -> String { "vllm".into() }
 fn default_base_url() -> String { "http://localhost:8000/v1".into() }
-fn default_concurrent() -> usize { 1 }
+fn default_concurrency() -> usize { 1 }
 fn default_duration_secs() -> u64 { 3600 }
 fn default_mode() -> String { "stream".into() }
 fn default_prompt_tokens() -> usize { 256 }
@@ -71,7 +69,7 @@ impl Default for Config {
             backend: default_backend(),
             base_url: default_base_url(),
             model: String::new(),
-            concurrent: default_concurrent(),
+            concurrency: default_concurrency(),
             duration_secs: default_duration_secs(),
             request_count: 0,
             mode: default_mode(),
@@ -87,7 +85,6 @@ impl Default for Config {
             tag: String::new(),
             http_proxy: String::new(),
             trace: false,
-            warmup: 0,
         }
     }
 }
@@ -111,7 +108,7 @@ impl Config {
         if let Some(ref v) = o.backend      { self.backend = v.clone(); }
         if let Some(ref v) = o.base_url     { self.base_url = v.clone(); }
         if let Some(ref v) = o.model        { self.model = v.clone(); }
-        if let Some(v) = o.concurrent       { self.concurrent = v; }
+        if let Some(v) = o.concurrency     { self.concurrency = v; }
         if let Some(v) = o.duration_secs    { self.duration_secs = v; }
         if let Some(v) = o.request_count    { self.request_count = v; }
         if let Some(ref v) = o.mode         { self.mode = v.clone(); }
@@ -127,7 +124,6 @@ impl Config {
         if let Some(ref v) = o.http_proxy   { self.http_proxy = v.clone(); }
         if let Some(v) = o.trace            { self.trace = v; }
         if let Some(ref v) = o.tag          { self.tag = v.clone(); }
-        if let Some(v) = o.warmup           { self.warmup = v; }
     }
 
     pub fn duration(&self) -> std::time::Duration {
@@ -140,7 +136,7 @@ pub struct ConfigOverrides {
     pub backend: Option<String>,
     pub base_url: Option<String>,
     pub model: Option<String>,
-    pub concurrent: Option<usize>,
+    pub concurrency: Option<usize>,
     pub duration_secs: Option<u64>,
     pub request_count: Option<usize>,
     pub mode: Option<String>,
@@ -156,5 +152,4 @@ pub struct ConfigOverrides {
     pub http_proxy: Option<String>,
     pub trace: Option<bool>,
     pub tag: Option<String>,
-    pub warmup: Option<usize>,
 }

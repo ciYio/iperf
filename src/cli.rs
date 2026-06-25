@@ -78,9 +78,6 @@ pub struct RunArgs {
     /// Tag for results
     #[arg(long)]
     pub tag: Option<String>,
-    /// Warmup requests (excluded from metrics)
-    #[arg(long)]
-    pub warmup: Option<usize>,
     /// Target base URL (positional)
     #[arg(index = 1)]
     pub target: Option<String>,
