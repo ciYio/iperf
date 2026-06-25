@@ -11,6 +11,8 @@ pub struct Cli {
 pub enum Commands {
     /// Run a benchmark
     Run(RunArgs),
+    /// Watch GPU and inference metrics
+    Watch(WatchArgs),
     /// Generate default config.yaml
     Config(ConfigArgs),
     /// Model download and serving
@@ -81,6 +83,34 @@ pub struct RunArgs {
     /// Target base URL (positional)
     #[arg(index = 1)]
     pub target: Option<String>,
+}
+
+#[derive(clap::Args)]
+pub struct WatchArgs {
+    /// Target base URL (e.g., http://localhost:8000/v1)
+    #[arg(index = 1)]
+    pub target: Option<String>,
+    /// Sampling interval in seconds
+    #[arg(long, short = 'i', default_value_t = 2)]
+    pub interval: u64,
+    /// Enable nsys GPU profiling
+    #[arg(long)]
+    pub nsys: bool,
+    /// Stop after duration (e.g., "60s", "5m", "1h")
+    #[arg(long, short = 'd')]
+    pub duration: Option<String>,
+    /// Backend type (vllm, sglang) — affects metric name prefixes
+    #[arg(long, short = 'b')]
+    pub backend: Option<String>,
+    /// Model name (used for JSONL filename)
+    #[arg(long, short = 'm')]
+    pub model: Option<String>,
+    /// Tag for JSONL filename
+    #[arg(long)]
+    pub tag: Option<String>,
+    /// JSONL output directory
+    #[arg(long)]
+    pub output_dir: Option<String>,
 }
 
 #[derive(clap::Args)]

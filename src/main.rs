@@ -6,9 +6,11 @@ mod metrics;
 mod report;
 mod cli;
 mod cmd_run;
+mod cmd_watch;
 mod cmd_config;
 mod download;
 mod hub;
+mod watch;
 
 use clap::Parser;
 use cli::{Cli, Commands, HubCommands};
@@ -31,6 +33,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Run(args) => cmd_run::run(args).await?,
+        Commands::Watch(args) => cmd_watch::run(args).await?,
         Commands::Config(args) => cmd_config::run(args)?,
         Commands::Hub(args) => match args.command {
             HubCommands::Download(dl_args) => cmd_hub_download(dl_args).await?,
