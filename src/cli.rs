@@ -50,13 +50,13 @@ pub struct RunArgs {
     /// Max output tokens
     #[arg(long)]
     pub output_tokens: Option<usize>,
-    /// Prepend UUID to each request (disable KV cache)
+    /// Prepend UUID to each request (0% cache hit, overrides cache-rate)
     #[arg(long)]
     pub no_cache: bool,
     /// Prompt pool size
     #[arg(long)]
     pub num_prefix_prompts: Option<usize>,
-    /// Cache hit percentage (overrides num_prefix_prompts)
+    /// Cache hit percentage (0=fully unique, 100=fully cacheable)
     #[arg(long)]
     pub cache_rate: Option<usize>,
     /// Random seed

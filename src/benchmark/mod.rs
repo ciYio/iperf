@@ -116,7 +116,8 @@ mod tests {
         let prompt_gen = PromptGenerator::new(256, 42, 0, 10);
         let prompt = prompt_gen.next();
         assert!(!prompt.is_empty());
-        assert_eq!(prompt.len(), 256 * CHARS_PER_TOKEN);
+        // Pool prompts are generated at 2x prompt_tokens length
+        assert_eq!(prompt.len(), 256 * 2 * CHARS_PER_TOKEN);
     }
 
     #[test]

@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::backend::Backend;
 use crate::metrics::{calc_prefill_decode, calc_stats, Collector, PrefillDecodeSummary, Sample, Stats};
@@ -22,6 +23,7 @@ pub struct Runner {
     pub max_tokens: usize,
     pub no_cache: bool,
     pub trace: bool,
+    pub cache_rate: usize,    // 0-100: percentage of prompt to cache
     pub cancel: CancellationToken,
 }
 
@@ -88,6 +90,7 @@ impl Runner {
             let max_tokens = self.max_tokens;
             let no_cache = self.no_cache;
             let trace = self.trace;
+            let cache_rate = self.cache_rate;
             let collector = collector.clone();
             let error_count = error_count.clone();
             let total_count = total_count.clone();
@@ -121,6 +124,14 @@ impl Runner {
                     };
 
                     let prompt = prompt_gen.next();
+                    // Cache control (mutually exclusive):
+                    //   --no-cache     → backend prepends UUID at start (0% cache)
+                    //   --cache-rate N → runner inserts UUID at N% position (1-99 only)
+                    let prompt = if !no_cache && (1..=99).contains(&cache_rate) {
+                        insert_cache_breaker(&prompt, cache_rate)
+                    } else {
+                        prompt
+                    };
                     let prompt_char_len = prompt.len();
 
                     let mut req = new_benchmark_request(&model, &prompt, max_tokens);
@@ -212,5 +223,73 @@ impl Runner {
             total_requests,
             wall_clock,
         })
+    }
+}
+
+/// Insert a UUID at the position determined by cache_rate.
+/// Everything before the UUID is a shared prefix (cacheable),
+/// the UUID and everything after it is unique per request.
+///
+/// cache_rate=50 → UUID at 50% of prompt length
+/// cache_rate=0  → no insertion (fully unique)
+/// cache_rate=100→ no insertion (fully cacheable)
+fn insert_cache_breaker(prompt: &str, cache_rate: usize) -> String {
+    let pos = prompt.len() * cache_rate / 100;
+    let pos = find_word_boundary(prompt, pos);
+    let uuid = Uuid::new_v4();
+    let mut result = String::with_capacity(prompt.len() + 37);
+    result.push_str(&prompt[..pos]);
+    result.push_str(&format!("\n[{}]\n", uuid));
+    result.push_str(&prompt[pos..]);
+    result
+}
+
+/// Find the nearest space at or after `pos` to avoid splitting mid-word.
+fn find_word_boundary(s: &str, pos: usize) -> usize {
+    if pos >= s.len() { return s.len(); }
+    s[pos..].find(' ')
+        .map(|i| pos + i + 1) // skip past the space
+        .unwrap_or(s.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_insert_cache_breaker_50() {
+        let prompt = "hello world this is a test prompt for cache rate testing purposes";
+        let result = insert_cache_breaker(prompt, 50);
+        // UUID is 36 chars + "\n[\n" + "]\n" = ~40 chars
+        assert!(result.len() > prompt.len());
+        // Should contain a UUID pattern
+        assert!(result.contains("["));
+        assert!(result.contains("]"));
+        // Prefix before UUID should match ~50% of original prompt
+        let uuid_start = result.find("[").unwrap();
+        // Rough check: UUID position is near 50% of original length
+        assert!(uuid_start >= prompt.len() * 45 / 100);
+        assert!(uuid_start <= prompt.len() * 65 / 100);
+    }
+
+    #[test]
+    fn test_insert_cache_breaker_unique() {
+        let prompt = "hello world foo bar baz qux test";
+        let r1 = insert_cache_breaker(prompt, 50);
+        let r2 = insert_cache_breaker(prompt, 50);
+        // Same prefix, different UUIDs
+        assert_ne!(r1, r2);
+        // But same prefix up to the UUID position
+        let p1 = r1.find("[").unwrap();
+        let p2 = r2.find("[").unwrap();
+        assert_eq!(&r1[..p1], &r2[..p2]);
+    }
+
+    #[test]
+    fn test_find_word_boundary() {
+        let s = "hello world foo bar";
+        assert_eq!(find_word_boundary(s, 0), 6);   // after "hello "
+        assert_eq!(find_word_boundary(s, 6), 12);   // after "world "
+        assert_eq!(find_word_boundary(s, 19), 19);  // at end
     }
 }

@@ -102,6 +102,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         max_tokens: cfg.output_tokens,
         no_cache: cfg.no_cache,
         trace: cfg.trace,
+        cache_rate: cfg.cache_rate,
         cancel: cancel.clone(),
     };
 
