@@ -175,13 +175,22 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
 
     // 6. Set up cancellation token for graceful shutdown
     let cancel = CancellationToken::new();
+    let force_cancel = CancellationToken::new();
 
-    // Set up SIGINT handler
+    // Set up SIGINT handler — first Ctrl+C starts graceful shutdown, second forces immediate exit
     let cancel_for_signal = cancel.clone();
+    let force_cancel_for_signal = force_cancel.clone();
     tokio::spawn(async move {
+        // First Ctrl+C: start graceful shutdown
         if tokio::signal::ctrl_c().await.is_ok() {
-            eprintln!("\n  Interrupted! Finishing current requests and collecting stats...");
+            eprintln!("\n  Interrupted! Waiting up to 5s for in-flight requests... (Ctrl+C again to force exit)");
             cancel_for_signal.cancel();
+
+            // Second Ctrl+C: force immediate exit, abort in-flight requests
+            if tokio::signal::ctrl_c().await.is_ok() {
+                eprintln!("\n  Force exit! Aborting in-flight requests...");
+                force_cancel_for_signal.cancel();
+            }
         }
     });
 
@@ -209,6 +218,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         cache_rate: cfg.cache_rate,
         system_prompt_gen,
         cancel: cancel.clone(),
+        force_cancel: force_cancel.clone(),
     };
 
     let result = runner.run(&prompt_gen).await?;

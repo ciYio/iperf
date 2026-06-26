@@ -40,10 +40,14 @@ impl PromptGenerator {
         // Apply modulo 100 to stddev to keep it in reasonable range (0-99%)
         let effective_stddev = prompt_stddev % 100;
 
-        // Use fixed max length for pool: 2x prompt_tokens (or at least prompt_tokens + 100)
-        // This ensures pool prompts are long enough for any truncation,
-        // and remain consistent regardless of stddev
-        let max_tokens = (prompt_tokens * 2).max(prompt_tokens + 100).min(corpus.len() / CHARS_PER_TOKEN);
+        // Pool prompt length:
+        // - If stddev=0: use exact prompt_tokens (no truncation needed)
+        // - If stddev>0: use 2x prompt_tokens to support variation (up to ±stddev%)
+        let max_tokens = if effective_stddev == 0 {
+            prompt_tokens.min(corpus.len() / CHARS_PER_TOKEN)
+        } else {
+            (prompt_tokens * 2).max(prompt_tokens + 100).min(corpus.len() / CHARS_PER_TOKEN)
+        };
 
         let prompts: Vec<String> = (0..num_prefix_prompts)
             .map(|_| {
@@ -177,8 +181,8 @@ mod tests {
         let prompt_gen = PromptGenerator::new(256, 42, 0, 10);
         let prompt = prompt_gen.next();
         assert!(!prompt.is_empty());
-        // Pool prompts are generated at 2x prompt_tokens length
-        assert_eq!(prompt.len(), 256 * 2 * CHARS_PER_TOKEN);
+        // Pool prompts are generated at exact prompt_tokens length when stddev=0
+        assert_eq!(prompt.len(), 256 * CHARS_PER_TOKEN);
     }
 
     #[test]

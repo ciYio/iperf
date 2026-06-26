@@ -25,6 +25,7 @@ pub struct Runner {
     pub cache_rate: usize,    // 0-100: percentage of prompt to cache
     pub system_prompt_gen: Option<SystemPromptGenerator>,
     pub cancel: CancellationToken,
+    pub force_cancel: CancellationToken, // Second Ctrl+C: abort in-flight requests
 }
 
 pub struct BenchResult {
@@ -109,6 +110,7 @@ impl Runner {
             let prompt_gen = prompt_gen.clone();
             let system_prompt_gen = self.system_prompt_gen.clone();
             let cancel = cancel.clone();
+            let force_cancel = self.force_cancel.clone();
 
             let handle = tokio::spawn(async move {
                 loop {
@@ -169,14 +171,23 @@ impl Runner {
                     };
                     let (req, prompt_char_len) = prompt;
 
-                    let result = match mode.as_str() {
-                        "stream" => {
-                            let mut _on_token = |_token: String, _delta: Duration| {};
-                            backend.send_stream(req, &mut _on_token).await
+                    // Send request with force_cancel support — abort if second Ctrl+C
+                    let result = tokio::select! {
+                        _ = force_cancel.cancelled() => {
+                            // Force exit: abort this request, don't count as error
+                            break;
                         }
-                        _ => {
-                            backend.send(req).await
-                        }
+                        res = async {
+                            match mode.as_str() {
+                                "stream" => {
+                                    let mut _on_token = |_token: String, _delta: Duration| {};
+                                    backend.send_stream(req, &mut _on_token).await
+                                }
+                                _ => {
+                                    backend.send(req).await
+                                }
+                            }
+                        } => res,
                     };
 
                     match result {
