@@ -57,18 +57,32 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         cfg.num_prefix_prompts,
     );
 
-    // 5. Trace mode
+    // 5. Trace mode — output a copy-pasteable curl command and exit
     if cfg.trace {
-        eprintln!("[trace] Sending test request to {}...", cfg.base_url);
         let prompt = prompt_gen.next();
-        let req = crate::benchmark::new_benchmark_request(&cfg.model, &prompt, cfg.output_tokens);
-        match backend_arc.send(req).await {
-            Ok(resp) => {
-                let snippet = &resp.content[..resp.content.len().min(200)];
-                eprintln!("[trace] Response: {snippet}...");
-            }
-            Err(e) => eprintln!("[trace] Error: {e}"),
+        let body = serde_json::json!({
+            "model": cfg.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": cfg.output_tokens,
+            "temperature": 0.0,
+            "stream": true,
+            "stream_options": {"include_usage": true}
+        });
+        let body_str = serde_json::to_string_pretty(&body).unwrap();
+
+        let mut curl = format!(
+            "curl -N '{}/chat/completions' \\\n  -H 'Content-Type: application/json' \\\n",
+            cfg.base_url
+        );
+        if !cfg.http_proxy.is_empty() {
+            curl += &format!("  -x {} \\\n", cfg.http_proxy);
         }
+        curl += "  -d @- <<'EOF'\n";
+        curl += &body_str;
+        curl += "\nEOF";
+
+        println!("{curl}");
+        return Ok(());
     }
 
     // 6. Set up cancellation token for graceful shutdown
@@ -133,7 +147,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         cache_rate: cfg.cache_rate,
         num_prefix_prompts: cfg.num_prefix_prompts,
         interrupted,
-        warmup: args.warmup > 0,
+        warmup: args.warmup,
     };
 
     renderer.render(
