@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::cli::WatchArgs;
-use crate::cmd_run::parse_duration_secs;
+use crate::cmd_run::parse_duration;
 use crate::watch::gpu_collector::GpuCollector;
 use crate::watch::infer_collector::InferenceCollector;
 use crate::watch::nsys_collector::NsysCollector;
@@ -80,7 +80,7 @@ pub async fn run(args: WatchArgs) -> anyhow::Result<()> {
     // Watch loop
     let mut ticker = tokio::time::interval(Duration::from_secs(interval));
     let deadline = args.duration.as_deref()
-        .map(parse_duration_secs)
+        .map(parse_duration)
         .transpose()?
         .map(|secs| tokio::time::Instant::now() + Duration::from_secs(secs));
 

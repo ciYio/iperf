@@ -20,10 +20,10 @@ pub struct Renderer {
     pub prompt_tokens: usize,
     pub output_tokens: usize,
     #[allow(dead_code)]
-    pub duration_secs: u64,
+    pub duration: u64,
     pub no_cache: bool,
     pub seed: i64,
-    pub prompt_stddev: usize,
+    pub prompt_tokens_stddev: usize,
     #[allow(dead_code)]
     pub http_proxy: String,
     pub cache_rate: usize,
@@ -46,7 +46,7 @@ struct JsonOutput {
     #[serde(skip_serializing_if = "is_zero_i64")]
     seed: i64,
     #[serde(skip_serializing_if = "is_zero")]
-    prompt_stddev: usize,
+    prompt_tokens_stddev: usize,
     #[serde(skip_serializing_if = "is_zero")]
     cache_rate: usize,
     #[serde(skip_serializing_if = "is_zero")]
@@ -196,7 +196,7 @@ impl Renderer {
             output_tokens: self.output_tokens,
             no_cache: self.no_cache,
             seed: self.seed,
-            prompt_stddev: self.prompt_stddev,
+            prompt_tokens_stddev: self.prompt_tokens_stddev,
             cache_rate: self.cache_rate,
             num_prefix_prompts: self.num_prefix_prompts,
             tag: self.tag.clone(),

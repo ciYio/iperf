@@ -23,7 +23,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         base_url: args.target.clone(),
         model: args.model.clone(),
         concurrency: args.concurrency,
-        duration_secs: args.duration.as_deref().map(parse_duration_secs).transpose()?,
+        duration: args.duration.as_deref().map(parse_duration).transpose()?,
         request_count: args.request_count,
         mode: args.mode.clone(),
         prompt_tokens: args.prompt_tokens,
@@ -32,7 +32,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         num_prefix_prompts: args.num_prefix_prompts,
         cache_rate: args.cache_rate,
         seed: args.seed,
-        prompt_stddev: args.prompt_tokens_stddev,
+        prompt_tokens_stddev: args.prompt_tokens_stddev,
         format: args.format.clone(),
         output_dir: args.output_dir.clone(),
         http_proxy: args.http_proxy.clone(),
@@ -53,7 +53,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     let prompt_gen = PromptGenerator::new(
         cfg.prompt_tokens,
         cfg.seed as u64,
-        cfg.prompt_stddev,
+        cfg.prompt_tokens_stddev,
         cfg.num_prefix_prompts,
     );
 
@@ -87,9 +87,9 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     if cfg.request_count > 0 {
         eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, requests={})",
             cfg.model, cfg.backend, cfg.mode, cfg.concurrency, cfg.request_count);
-    } else if cfg.duration_secs > 0 {
+    } else if cfg.duration > 0 {
         eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, duration={}s)",
-            cfg.model, cfg.backend, cfg.mode, cfg.concurrency, cfg.duration_secs);
+            cfg.model, cfg.backend, cfg.mode, cfg.concurrency, cfg.duration);
     } else {
         eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, until Ctrl+C)",
             cfg.model, cfg.backend, cfg.mode, cfg.concurrency);
@@ -125,10 +125,10 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         tag: cfg.tag.clone(),
         prompt_tokens: cfg.prompt_tokens,
         output_tokens: cfg.output_tokens,
-        duration_secs: cfg.duration_secs,
+        duration: cfg.duration,
         no_cache: cfg.no_cache,
         seed: cfg.seed,
-        prompt_stddev: cfg.prompt_stddev,
+        prompt_tokens_stddev: cfg.prompt_tokens_stddev,
         http_proxy: cfg.http_proxy.clone(),
         cache_rate: cfg.cache_rate,
         num_prefix_prompts: cfg.num_prefix_prompts,
@@ -151,7 +151,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn parse_duration_secs(s: &str) -> anyhow::Result<u64> {
+pub fn parse_duration(s: &str) -> anyhow::Result<u64> {
     let s = s.trim();
     if s.is_empty() {
         anyhow::bail!("empty duration");

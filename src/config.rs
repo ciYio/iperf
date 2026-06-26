@@ -13,8 +13,8 @@ pub struct Config {
     pub model: String,
     #[serde(default = "default_concurrency")]
     pub concurrency: usize,
-    #[serde(default = "default_duration_secs")]
-    pub duration_secs: u64,
+    #[serde(default = "default_duration")]
+    pub duration: u64,
     #[serde(default)]
     pub request_count: usize,
     #[serde(default = "default_mode")]
@@ -32,7 +32,7 @@ pub struct Config {
     #[serde(default)]
     pub seed: i64,
     #[serde(default)]
-    pub prompt_stddev: usize,
+    pub prompt_tokens_stddev: usize,
     #[serde(default = "default_format")]
     pub format: String,
     #[serde(default = "default_output_dir")]
@@ -48,7 +48,7 @@ pub struct Config {
 fn default_backend() -> String { "vllm".into() }
 fn default_base_url() -> String { "http://localhost:8000/v1".into() }
 fn default_concurrency() -> usize { 1 }
-fn default_duration_secs() -> u64 { 0 }
+fn default_duration() -> u64 { 0 }
 fn default_mode() -> String { "stream".into() }
 fn default_prompt_tokens() -> usize { 256 }
 fn default_output_tokens() -> usize { 256 }
@@ -70,7 +70,7 @@ impl Default for Config {
             base_url: default_base_url(),
             model: String::new(),
             concurrency: default_concurrency(),
-            duration_secs: default_duration_secs(),
+            duration: default_duration(),
             request_count: 0,
             mode: default_mode(),
             prompt_tokens: default_prompt_tokens(),
@@ -79,7 +79,7 @@ impl Default for Config {
             num_prefix_prompts: default_num_prefix_prompts(),
             cache_rate: 0,
             seed: 0,
-            prompt_stddev: 0,
+            prompt_tokens_stddev: 0,
             format: default_format(),
             output_dir: default_output_dir(),
             tag: String::new(),
@@ -109,7 +109,7 @@ impl Config {
         if let Some(ref v) = o.base_url     { self.base_url = v.clone(); }
         if let Some(ref v) = o.model        { self.model = v.clone(); }
         if let Some(v) = o.concurrency     { self.concurrency = v; }
-        if let Some(v) = o.duration_secs    { self.duration_secs = v; }
+        if let Some(v) = o.duration    { self.duration = v; }
         if let Some(v) = o.request_count    { self.request_count = v; }
         if let Some(ref v) = o.mode         { self.mode = v.clone(); }
         if let Some(v) = o.prompt_tokens    { self.prompt_tokens = v; }
@@ -118,7 +118,7 @@ impl Config {
         if let Some(v) = o.num_prefix_prompts { self.num_prefix_prompts = v; }
         if let Some(v) = o.cache_rate       { self.cache_rate = v; }
         if let Some(v) = o.seed             { self.seed = v; }
-        if let Some(v) = o.prompt_stddev    { self.prompt_stddev = v; }
+        if let Some(v) = o.prompt_tokens_stddev    { self.prompt_tokens_stddev = v; }
         if let Some(ref v) = o.format       { self.format = v.clone(); }
         if let Some(ref v) = o.output_dir   { self.output_dir = v.clone(); }
         if let Some(ref v) = o.http_proxy   { self.http_proxy = v.clone(); }
@@ -127,7 +127,7 @@ impl Config {
     }
 
     pub fn duration(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(self.duration_secs)
+        std::time::Duration::from_secs(self.duration)
     }
 }
 
@@ -137,7 +137,7 @@ pub struct ConfigOverrides {
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub concurrency: Option<usize>,
-    pub duration_secs: Option<u64>,
+    pub duration: Option<u64>,
     pub request_count: Option<usize>,
     pub mode: Option<String>,
     pub prompt_tokens: Option<usize>,
@@ -146,7 +146,7 @@ pub struct ConfigOverrides {
     pub num_prefix_prompts: Option<usize>,
     pub cache_rate: Option<usize>,
     pub seed: Option<i64>,
-    pub prompt_stddev: Option<usize>,
+    pub prompt_tokens_stddev: Option<usize>,
     pub format: Option<String>,
     pub output_dir: Option<String>,
     pub http_proxy: Option<String>,
