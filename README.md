@@ -45,7 +45,7 @@ git push origin v0.1.8
 **下载预构建二进制：**
 ```bash
 # 从 GitHub Releases 下载
-curl -L -o iperf https://github.com/<owner>/iperf/releases/download/v0.1.8/iperf-v0.1.8-linux-amd64
+curl -L -o iperf https://github.com/ciYio/iperf/releases/download/v0.1.8/iperf-v0.1.8-linux-amd64
 chmod +x iperf
 ```
 
