@@ -65,6 +65,12 @@ pub struct RunArgs {
     /// Prompt length standard deviation
     #[arg(long)]
     pub prompt_tokens_stddev: Option<usize>,
+    /// System prompt length in tokens (0 = disabled)
+    #[arg(long)]
+    pub system_prompt_tokens: Option<usize>,
+    /// Number of unique system prompts (pool size)
+    #[arg(long)]
+    pub num_system_prompts: Option<usize>,
     /// Output format: table, json
     #[arg(long, short = 'f')]
     pub format: Option<String>,

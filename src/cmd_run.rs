@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::backend;
-use crate::benchmark::{PromptGenerator, Runner};
+use crate::benchmark::{PromptGenerator, Runner, SystemPromptGenerator};
 use crate::cli::RunArgs;
 use crate::config::{Config, ConfigOverrides};
 use crate::report::Renderer;
@@ -33,6 +33,8 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         cache_rate: args.cache_rate,
         seed: args.seed,
         prompt_tokens_stddev: args.prompt_tokens_stddev,
+        system_prompt_tokens: args.system_prompt_tokens,
+        num_system_prompts: args.num_system_prompts,
         format: args.format.clone(),
         output_dir: args.output_dir.clone(),
         http_proxy: args.http_proxy.clone(),
@@ -50,24 +52,57 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     let backend_arc: Arc<dyn backend::Backend> = Arc::from(backend_inst);
 
     // 4. Create prompt generator
+    // prompt_tokens = total input (system + user). If system prompt enabled, reduce user tokens.
+    let user_prompt_tokens = if cfg.system_prompt_tokens > 0 {
+        cfg.prompt_tokens.saturating_sub(cfg.system_prompt_tokens)
+    } else {
+        cfg.prompt_tokens
+    };
+
     let prompt_gen = PromptGenerator::new(
-        cfg.prompt_tokens,
+        user_prompt_tokens,
         cfg.seed as u64,
         cfg.prompt_tokens_stddev,
         cfg.num_prefix_prompts,
     );
 
+    let system_prompt_gen = if cfg.system_prompt_tokens > 0 {
+        Some(SystemPromptGenerator::new(
+            cfg.system_prompt_tokens,
+            cfg.num_system_prompts,
+            cfg.seed as u64,
+        ))
+    } else {
+        None
+    };
+
     // 5. Trace mode — output a copy-pasteable curl command and exit
     if cfg.trace {
-        let prompt = prompt_gen.next();
-        let body = serde_json::json!({
-            "model": cfg.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": cfg.output_tokens,
-            "temperature": 0.0,
-            "stream": true,
-            "stream_options": {"include_usage": true}
-        });
+        let body = if let Some(ref sys_gen) = system_prompt_gen {
+            let sys_prompt = sys_gen.get(0);
+            let user_prompt = prompt_gen.get(0);
+            serde_json::json!({
+                "model": cfg.model,
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "max_tokens": cfg.output_tokens,
+                "temperature": 0.0,
+                "stream": true,
+                "stream_options": {"include_usage": true}
+            })
+        } else {
+            let user_prompt = prompt_gen.get(0);
+            serde_json::json!({
+                "model": cfg.model,
+                "messages": [{"role": "user", "content": user_prompt}],
+                "max_tokens": cfg.output_tokens,
+                "temperature": 0.0,
+                "stream": true,
+                "stream_options": {"include_usage": true}
+            })
+        };
         let body_str = serde_json::to_string_pretty(&body).unwrap();
 
         let mut curl = format!(
@@ -120,6 +155,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         no_cache: cfg.no_cache,
         trace: cfg.trace,
         cache_rate: cfg.cache_rate,
+        system_prompt_gen,
         cancel: cancel.clone(),
     };
 

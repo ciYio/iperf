@@ -11,7 +11,7 @@ use crate::backend::Backend;
 use crate::metrics::{calc_prefill_decode, calc_stats, Collector, PrefillDecodeSummary, Sample, Stats};
 use crate::error::Result;
 
-use super::{new_benchmark_request, PromptGenerator};
+use super::{new_benchmark_request, new_benchmark_request_with_system, PromptGenerator, SystemPromptGenerator};
 
 pub struct Runner {
     pub backend: Arc<dyn Backend>,
@@ -24,6 +24,7 @@ pub struct Runner {
     pub no_cache: bool,
     pub trace: bool,
     pub cache_rate: usize,    // 0-100: percentage of prompt to cache
+    pub system_prompt_gen: Option<SystemPromptGenerator>,
     pub cancel: CancellationToken,
 }
 
@@ -108,6 +109,7 @@ impl Runner {
             let total_count = total_count.clone();
             let completed_count = completed_count.clone();
             let prompt_gen = prompt_gen.clone();
+            let system_prompt_gen = self.system_prompt_gen.clone();
             let cancel = cancel.clone();
 
             let handle = tokio::spawn(async move {
@@ -137,19 +139,37 @@ impl Runner {
                         total_count.fetch_add(1, Ordering::Relaxed) + 1
                     };
 
-                    let prompt = prompt_gen.next();
-                    // Cache control (mutually exclusive):
-                    //   --no-cache     → backend prepends UUID at start (0% cache)
-                    //   --cache-rate N → runner inserts UUID at N% position (1-99 only)
-                    let prompt = if !no_cache && (1..=99).contains(&cache_rate) {
-                        insert_cache_breaker(&prompt, cache_rate)
-                    } else {
-                        prompt
-                    };
-                    let prompt_char_len = prompt.len();
+                    // Use req_num for pool coordination (system + user pools share same index)
+                    let prompt = if let Some(ref sys_gen) = system_prompt_gen {
+                        // With system prompt: use get(index) for both pools
+                        let sys_prompt = sys_gen.get(req_num);
+                        let user_prompt = prompt_gen.get(req_num);
 
-                    let mut req = new_benchmark_request(&model, &prompt, max_tokens);
-                    req.no_cache = no_cache;
+                        // Cache control on user prompt
+                        let user_prompt = if !no_cache && (1..=99).contains(&cache_rate) {
+                            insert_cache_breaker(&user_prompt, cache_rate)
+                        } else {
+                            user_prompt
+                        };
+
+                        let prompt_char_len = sys_prompt.len() + user_prompt.len();
+                        let mut req = new_benchmark_request_with_system(&model, &sys_prompt, &user_prompt, max_tokens);
+                        req.no_cache = no_cache;
+                        (req, prompt_char_len)
+                    } else {
+                        // No system prompt: use next() for backward compatibility
+                        let prompt = prompt_gen.next();
+                        let prompt = if !no_cache && (1..=99).contains(&cache_rate) {
+                            insert_cache_breaker(&prompt, cache_rate)
+                        } else {
+                            prompt
+                        };
+                        let prompt_char_len = prompt.len();
+                        let mut req = new_benchmark_request(&model, &prompt, max_tokens);
+                        req.no_cache = no_cache;
+                        (req, prompt_char_len)
+                    };
+                    let (req, prompt_char_len) = prompt;
 
                     let result = match mode.as_str() {
                         "stream" => {

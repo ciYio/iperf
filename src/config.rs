@@ -32,6 +32,10 @@ pub struct Config {
     pub seed: i64,
     #[serde(default)]
     pub prompt_tokens_stddev: usize,
+    #[serde(default)]
+    pub system_prompt_tokens: usize,
+    #[serde(default = "default_num_system_prompts")]
+    pub num_system_prompts: usize,
     #[serde(default = "default_format")]
     pub format: String,
     #[serde(default = "default_output_dir")]
@@ -52,6 +56,7 @@ fn default_mode() -> String { "stream".into() }
 fn default_prompt_tokens() -> usize { 256 }
 fn default_output_tokens() -> usize { 256 }
 fn default_num_prefix_prompts() -> usize { 100 }
+fn default_num_system_prompts() -> usize { 1 }
 fn default_format() -> String { "table".into() }
 fn default_output_dir() -> String {
     // Default output dir is next to the iperf binary
@@ -79,6 +84,8 @@ impl Default for Config {
             cache_rate: 0,
             seed: 0,
             prompt_tokens_stddev: 0,
+            system_prompt_tokens: 0,
+            num_system_prompts: default_num_system_prompts(),
             format: default_format(),
             output_dir: default_output_dir(),
             tag: String::new(),
@@ -119,6 +126,8 @@ impl Config {
         if let Some(v) = o.cache_rate       { self.cache_rate = v; }
         if let Some(v) = o.seed             { self.seed = v; }
         if let Some(v) = o.prompt_tokens_stddev    { self.prompt_tokens_stddev = v; }
+        if let Some(v) = o.system_prompt_tokens { self.system_prompt_tokens = v; }
+        if let Some(v) = o.num_system_prompts { self.num_system_prompts = v; }
         if let Some(ref v) = o.format       { self.format = v.clone(); }
         if let Some(ref v) = o.output_dir   { self.output_dir = v.clone(); }
         if let Some(ref v) = o.http_proxy   { self.http_proxy = v.clone(); }
@@ -147,6 +156,8 @@ pub struct ConfigOverrides {
     pub cache_rate: Option<usize>,
     pub seed: Option<i64>,
     pub prompt_tokens_stddev: Option<usize>,
+    pub system_prompt_tokens: Option<usize>,
+    pub num_system_prompts: Option<usize>,
     pub format: Option<String>,
     pub output_dir: Option<String>,
     pub http_proxy: Option<String>,
