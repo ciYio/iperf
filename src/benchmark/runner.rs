@@ -22,7 +22,6 @@ pub struct Runner {
     pub mode: String,         // "single" | "stream" | "continuous"
     pub max_tokens: usize,
     pub no_cache: bool,
-    pub trace: bool,
     pub cache_rate: usize,    // 0-100: percentage of prompt to cache
     pub system_prompt_gen: Option<SystemPromptGenerator>,
     pub cancel: CancellationToken,
@@ -102,7 +101,6 @@ impl Runner {
             let mode = self.mode.clone();
             let max_tokens = self.max_tokens;
             let no_cache = self.no_cache;
-            let trace = self.trace;
             let cache_rate = self.cache_rate;
             let collector = collector.clone();
             let error_count = error_count.clone();
@@ -187,30 +185,11 @@ impl Runner {
                             if resp.timing.prompt_tokens == 0 {
                                 resp.timing.prompt_tokens = prompt_char_len / 4; // ~4 chars per token
                             }
-                            // Trace: show details for first 5 requests
-                            if trace && req_num <= 5 {
-                                eprintln!(
-                                    "[trace] req#{} prompt_len={} prompt_tokens={} cached_tokens={} cache_rate={:.1}%",
-                                    req_num,
-                                    prompt_char_len,
-                                    resp.timing.prompt_tokens,
-                                    resp.timing.cached_tokens,
-                                    if resp.timing.prompt_tokens > 0 {
-                                        resp.timing.cached_tokens as f64 / resp.timing.prompt_tokens as f64 * 100.0
-                                    } else { 0.0 }
-                                );
-                            }
                             collector.add(resp.timing.to_sample());
-                            if trace && req_num == 1 {
-                                let snippet = &resp.content[..resp.content.len().min(100)];
-                                eprintln!("[trace] First response: {snippet}");
-                            }
                         }
                         Err(e) => {
+                            let _ = e; // suppress warning
                             error_count.fetch_add(1, Ordering::Relaxed);
-                            if trace {
-                                eprintln!("[trace] Error: {e}");
-                            }
                         }
                     }
 

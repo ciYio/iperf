@@ -56,6 +56,7 @@ pub struct Message {
 
 #[derive(Debug)]
 pub struct Response {
+    #[allow(dead_code)]
     pub content: String,
     pub timing: Timing,
 }

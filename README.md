@@ -57,17 +57,19 @@ Options:
   -d, --duration <DURATION>            测试时长 (如 "60s", "5m", "1h")
       --request-count <COUNT>          最大请求数 (优先级高于 duration)
   -M, --mode <MODE>                    请求模式: single, stream [default: stream]
-      --prompt-tokens <N>              输入 token 数 [default: 256]
+      --prompt-tokens <N>              输入 token 数（包含 system prompt）[default: 256]
       --output-tokens <N>              最大输出 token 数 [default: 256]
+      --system-prompt-tokens <N>       System prompt 长度（0 = 禁用）[default: 0]
+      --num-system-prompts <N>         System prompt 池大小 [default: 1]
       --no-cache                       每个请求前加 UUID（禁用 KV cache）
-      --num-prefix-prompts <N>         prompt 池大小 [default: 100]
-      --cache-rate <N>                 cache 命中率百分比
+      --num-prefix-prompts <N>         User prompt 池大小 [default: 100]
+      --cache-rate <N>                 User prompt cache 命中率百分比 (0-100)
       --seed <N>                       随机种子
       --prompt-tokens-stddev <N>       prompt 长度标准差
   -f, --format <FORMAT>                输出格式: table, json [default: table]
       --output-dir <DIR>               JSONL 输出目录 [default: 二进制同级 output/]
       --http-proxy <URL>               HTTP 代理
-      --trace                          输出 curl 命令并退出（不执行压测）
+      --trace [<N>]                    输出第 N 个请求的 curl 命令并退出 [default: 1]
       --warmup                         标记为预热（输出带 warmup: true）
       --tag <TAG>                      结果标签
 ```
@@ -103,6 +105,8 @@ request_count: 0          # 0 = 不限制
 mode: stream
 prompt_tokens: 256
 output_tokens: 256
+system_prompt_tokens: 0   # 0 = 禁用 system prompt
+num_system_prompts: 1     # system prompt 池大小
 no_cache: false
 num_prefix_prompts: 100
 cache_rate: 0
@@ -175,6 +179,46 @@ IPERF Benchmark Results
 iperf run -m "model-name" --request-count 100 --num-prefix-prompts 1 http://localhost:8000/v1
 ```
 
+### System Prompt
+
+System prompt 用于控制 GPU prefix cache 行为。每个 system prompt 以 `[NNN]` 前缀开头，通过池大小控制 cache 命中率。
+
+**参数：**
+- `--system-prompt-tokens <N>` — system prompt 长度（0 = 禁用）
+- `--num-system-prompts <N>` — system prompt 池大小
+
+**工作原理：**
+- `prompt_tokens` = 总输入长度（system + user），user prompt 自动扣减
+- System prompt 结构：`[001] Shakespeare文本...`
+- 池循环：请求 1/4/7 用 `[001]`，2/5/8 用 `[002]`，3/6/9 用 `[003]`
+- 与 user prompt 池协调：使用相同的请求索引，确保配对一致
+
+**示例：**
+```bash
+# 高 cache 命中：system prompt 池=1
+iperf run -m model \
+  --system-prompt-tokens 100 \
+  --num-system-prompts 1 \
+  --num-prefix-prompts 1 \
+  --prompt-tokens 1024
+
+# 中等 cache 命中：两个池都=10
+iperf run -m model \
+  --system-prompt-tokens 100 \
+  --num-system-prompts 10 \
+  --num-prefix-prompts 10 \
+  --prompt-tokens 1024 \
+  --cache-rate 50
+```
+
+**查看实际请求：**
+```bash
+# 查看第 1、2、3 个请求的 system prompt
+iperf run -m model --trace 1 --system-prompt-tokens 50 --num-system-prompts 3
+iperf run -m model --trace 2 --system-prompt-tokens 50 --num-system-prompts 3
+iperf run -m model --trace 3 --system-prompt-tokens 50 --num-system-prompts 3
+```
+
 ### 进度条
 
 当使用 `--request-count` 时，会显示可视化进度条：
@@ -191,10 +235,14 @@ iperf run -m "model-name" --request-count 100 --num-prefix-prompts 1 http://loca
 
 ### Trace 模式
 
-生成可直接执行的 curl 命令，用于调试：
+生成指定请求的 curl 命令，用于调试：
 
 ```bash
+# 默认显示第 1 个请求
 iperf run -m "model-name" --trace --prompt-tokens 512 --output-tokens 128
+
+# 显示第 100 个请求（查看池循环效果）
+iperf run -m "model-name" --trace 100 --system-prompt-tokens 100 --num-system-prompts 5
 ```
 
 ## 架构

@@ -38,7 +38,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         format: args.format.clone(),
         output_dir: args.output_dir.clone(),
         http_proxy: args.http_proxy.clone(),
-        trace: if args.trace { Some(true) } else { None },
+        trace: args.trace,
         tag: args.tag.clone(),
     };
     cfg.merge_overrides(&overrides);
@@ -46,6 +46,45 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     if cfg.model.is_empty() {
         anyhow::bail!("--model is required");
     }
+
+    // Print configuration before running
+    eprintln!("Configuration:");
+    eprintln!("  model: {}", cfg.model);
+    eprintln!("  backend: {}", cfg.backend);
+    eprintln!("  base_url: {}", cfg.base_url);
+    eprintln!("  concurrency: {}", cfg.concurrency);
+    eprintln!("  mode: {}", cfg.mode);
+    eprintln!("  prompt_tokens: {}", cfg.prompt_tokens);
+    eprintln!("  output_tokens: {}", cfg.output_tokens);
+    if cfg.system_prompt_tokens > 0 {
+        eprintln!("  system_prompt_tokens: {}", cfg.system_prompt_tokens);
+        eprintln!("  num_system_prompts: {}", cfg.num_system_prompts);
+    }
+    if cfg.duration > 0 {
+        eprintln!("  duration: {}s", cfg.duration);
+    }
+    if cfg.request_count > 0 {
+        eprintln!("  request_count: {}", cfg.request_count);
+    }
+    if cfg.no_cache {
+        eprintln!("  no_cache: true");
+    }
+    if cfg.cache_rate > 0 {
+        eprintln!("  cache_rate: {}%", cfg.cache_rate);
+    }
+    if cfg.seed != 0 {
+        eprintln!("  seed: {}", cfg.seed);
+    }
+    if !cfg.http_proxy.is_empty() {
+        eprintln!("  http_proxy: {}", cfg.http_proxy);
+    }
+    if !cfg.tag.is_empty() {
+        eprintln!("  tag: {}", cfg.tag);
+    }
+    if args.warmup {
+        eprintln!("  warmup: true");
+    }
+    eprintln!();
 
     // 3. Create backend
     let backend_inst = backend::new_backend(&cfg.backend, &cfg.base_url, &cfg.http_proxy)?;
@@ -77,11 +116,14 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     };
 
     // 5. Trace mode — output a copy-pasteable curl command and exit
-    if cfg.trace {
+    if let Some(trace_idx) = cfg.trace {
+        // trace_idx is 1-based, convert to 0-based for pool indexing
+        let idx = trace_idx.saturating_sub(1);
+        let is_stream = cfg.mode == "stream";
         let body = if let Some(ref sys_gen) = system_prompt_gen {
-            let sys_prompt = sys_gen.get(0);
-            let user_prompt = prompt_gen.get(0);
-            serde_json::json!({
+            let sys_prompt = sys_gen.get(idx);
+            let user_prompt = prompt_gen.get(idx);
+            let mut msg = serde_json::json!({
                 "model": cfg.model,
                 "messages": [
                     {"role": "system", "content": sys_prompt},
@@ -89,32 +131,43 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
                 ],
                 "max_tokens": cfg.output_tokens,
                 "temperature": 0.0,
-                "stream": true,
-                "stream_options": {"include_usage": true}
-            })
+                "stream": is_stream
+            });
+            if is_stream {
+                msg.as_object_mut().unwrap().insert(
+                    "stream_options".to_string(),
+                    serde_json::json!({"include_usage": true})
+                );
+            }
+            msg
         } else {
-            let user_prompt = prompt_gen.get(0);
-            serde_json::json!({
+            let user_prompt = prompt_gen.get(idx);
+            let mut msg = serde_json::json!({
                 "model": cfg.model,
                 "messages": [{"role": "user", "content": user_prompt}],
                 "max_tokens": cfg.output_tokens,
                 "temperature": 0.0,
-                "stream": true,
-                "stream_options": {"include_usage": true}
-            })
+                "stream": is_stream
+            });
+            if is_stream {
+                msg.as_object_mut().unwrap().insert(
+                    "stream_options".to_string(),
+                    serde_json::json!({"include_usage": true})
+                );
+            }
+            msg
         };
-        let body_str = serde_json::to_string_pretty(&body).unwrap();
+        let body_str = serde_json::to_string(&body).unwrap();
 
+        let n_flag = if is_stream { "-N " } else { "" };
         let mut curl = format!(
-            "curl -N '{}/chat/completions' \\\n  -H 'Content-Type: application/json' \\\n",
-            cfg.base_url
+            "curl {}'{}/chat/completions' \\\n  -H 'Content-Type: application/json' \\\n",
+            n_flag, cfg.base_url
         );
         if !cfg.http_proxy.is_empty() {
             curl += &format!("  -x {} \\\n", cfg.http_proxy);
         }
-        curl += "  -d @- <<'EOF'\n";
-        curl += &body_str;
-        curl += "\nEOF";
+        curl += &format!("  -d '{}'", body_str);
 
         println!("{curl}");
         return Ok(());
@@ -153,7 +206,6 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         mode: cfg.mode.clone(),
         max_tokens: cfg.output_tokens,
         no_cache: cfg.no_cache,
-        trace: cfg.trace,
         cache_rate: cfg.cache_rate,
         system_prompt_gen,
         cancel: cancel.clone(),

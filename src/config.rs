@@ -45,7 +45,7 @@ pub struct Config {
     #[serde(default)]
     pub http_proxy: String,
     #[serde(default)]
-    pub trace: bool,
+    pub trace: Option<usize>,
 }
 
 fn default_backend() -> String { "vllm".into() }
@@ -90,7 +90,7 @@ impl Default for Config {
             output_dir: default_output_dir(),
             tag: String::new(),
             http_proxy: String::new(),
-            trace: false,
+            trace: None,
         }
     }
 }
@@ -131,7 +131,7 @@ impl Config {
         if let Some(ref v) = o.format       { self.format = v.clone(); }
         if let Some(ref v) = o.output_dir   { self.output_dir = v.clone(); }
         if let Some(ref v) = o.http_proxy   { self.http_proxy = v.clone(); }
-        if let Some(v) = o.trace            { self.trace = v; }
+        if let Some(v) = o.trace            { self.trace = Some(v); }
         if let Some(ref v) = o.tag          { self.tag = v.clone(); }
     }
 
@@ -161,7 +161,7 @@ pub struct ConfigOverrides {
     pub format: Option<String>,
     pub output_dir: Option<String>,
     pub http_proxy: Option<String>,
-    pub trace: Option<bool>,
+    pub trace: Option<usize>,
     pub tag: Option<String>,
 }
 
@@ -178,6 +178,8 @@ struct ConfigTemplate {
     mode: String,
     prompt_tokens: usize,
     output_tokens: usize,
+    system_prompt_tokens: usize,
+    num_system_prompts: usize,
     no_cache: bool,
     num_prefix_prompts: usize,
     cache_rate: usize,
@@ -195,6 +197,8 @@ impl From<&Config> for ConfigTemplate {
             mode: c.mode.clone(),
             prompt_tokens: c.prompt_tokens,
             output_tokens: c.output_tokens,
+            system_prompt_tokens: c.system_prompt_tokens,
+            num_system_prompts: c.num_system_prompts,
             no_cache: c.no_cache,
             num_prefix_prompts: c.num_prefix_prompts,
             cache_rate: c.cache_rate,

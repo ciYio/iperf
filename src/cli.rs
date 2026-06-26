@@ -80,9 +80,10 @@ pub struct RunArgs {
     /// HTTP proxy URL
     #[arg(long)]
     pub http_proxy: Option<String>,
-    /// Print a copy-pasteable curl command and exit (no benchmark)
-    #[arg(long)]
-    pub trace: bool,
+    /// Print a copy-pasteable curl command and exit (no benchmark).
+    /// Optional value: show the Nth request (default: 1)
+    #[arg(long, num_args = 0..=1, default_missing_value = "1")]
+    pub trace: Option<usize>,
     /// Mark this run as warmup (output tagged with warmup: true)
     #[arg(long)]
     pub warmup: bool,
