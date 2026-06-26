@@ -18,7 +18,7 @@ pub struct Runner {
     pub model: String,
     pub concurrent: usize,
     pub duration: Duration,
-    pub request_count: usize, // 0 = unlimited
+    pub request_count: usize, // 0 = use duration mode
     pub mode: String,         // "single" | "stream" | "continuous"
     pub max_tokens: usize,
     pub no_cache: bool,
@@ -44,7 +44,12 @@ impl Runner {
         let error_count = Arc::new(AtomicUsize::new(0));
         let total_count = Arc::new(AtomicUsize::new(0)); // 用于领取请求编号
         let completed_count = Arc::new(AtomicUsize::new(0)); // 用于进度条显示
-        let deadline = Instant::now() + self.duration;
+        // duration=0 → no deadline (run until Ctrl+C or request_count)
+        let deadline = if self.duration > Duration::ZERO {
+            Some(Instant::now() + self.duration)
+        } else {
+            None
+        };
         let request_count = self.request_count;
         let cancel = self.cancel.clone();
 
@@ -55,28 +60,35 @@ impl Runner {
         let progress_err = error_count.clone();
         let progress_request_count = request_count;
         let progress_handle = tokio::spawn(async move {
-            let pb = if progress_request_count > 0 {
+            if progress_request_count > 0 {
+                // request_count mode: progress bar with count
                 let pb = ProgressBar::new(progress_request_count as u64);
                 pb.set_style(ProgressStyle::default_bar()
                     .template("  [{bar:30}] {pos}/{len} requests, {msg}")
                     .unwrap()
                     .progress_chars("=>-"));
-                Some(pb)
-            } else {
-                None
-            };
 
-            let mut ticker = interval(Duration::from_secs(1));
-            loop {
-                ticker.tick().await;
-                let done = progress_total.load(Ordering::Relaxed);
-                let errs = progress_err.load(Ordering::Relaxed);
-
-                if let Some(ref pb) = pb {
+                let mut ticker = interval(Duration::from_secs(1));
+                loop {
+                    ticker.tick().await;
+                    let done = progress_total.load(Ordering::Relaxed);
+                    let errs = progress_err.load(Ordering::Relaxed);
                     pb.set_position(done as u64);
                     pb.set_message(format!("{errs} errors"));
-                } else {
-                    eprint!("\r  [{done} requests, {errs} errors]");
+                }
+            } else {
+                // duration mode (or unlimited): spinner with elapsed time + request count
+                let pb = ProgressBar::new_spinner();
+                pb.set_style(ProgressStyle::default_spinner()
+                    .template("  {spinner} [{elapsed_precise}] {msg}")
+                    .unwrap());
+
+                let mut ticker = interval(Duration::from_secs(1));
+                loop {
+                    ticker.tick().await;
+                    let done = progress_total.load(Ordering::Relaxed);
+                    let errs = progress_err.load(Ordering::Relaxed);
+                    pb.set_message(format!("{done} requests, {errs} errors"));
                 }
             }
         });
@@ -116,9 +128,11 @@ impl Runner {
                         }
                         num
                     } else {
-                        // duration mode: check deadline before claiming
-                        if Instant::now() >= deadline {
-                            break;
+                        // duration mode: check deadline (None = no limit, run until Ctrl+C)
+                        if let Some(dl) = deadline {
+                            if Instant::now() >= dl {
+                                break;
+                            }
                         }
                         total_count.fetch_add(1, Ordering::Relaxed) + 1
                     };

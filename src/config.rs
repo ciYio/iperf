@@ -48,7 +48,7 @@ pub struct Config {
 fn default_backend() -> String { "vllm".into() }
 fn default_base_url() -> String { "http://localhost:8000/v1".into() }
 fn default_concurrency() -> usize { 1 }
-fn default_duration_secs() -> u64 { 3600 }
+fn default_duration_secs() -> u64 { 0 }
 fn default_mode() -> String { "stream".into() }
 fn default_prompt_tokens() -> usize { 256 }
 fn default_output_tokens() -> usize { 256 }

@@ -87,9 +87,12 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     if cfg.request_count > 0 {
         eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, requests={})",
             cfg.model, cfg.backend, cfg.mode, cfg.concurrency, cfg.request_count);
-    } else {
+    } else if cfg.duration_secs > 0 {
         eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, duration={}s)",
             cfg.model, cfg.backend, cfg.mode, cfg.concurrency, cfg.duration_secs);
+    } else {
+        eprintln!("Benchmarking {} (backend={}, mode={}, concurrency={}, until Ctrl+C)",
+            cfg.model, cfg.backend, cfg.mode, cfg.concurrency);
     }
 
     let runner = Runner {
