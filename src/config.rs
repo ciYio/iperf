@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::error::{AppError, Result};
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_backend")]
@@ -98,7 +97,8 @@ impl Config {
 
     pub fn generate_default_yaml(path: &Path) -> Result<()> {
         let cfg = Config::default();
-        let yaml = serde_yaml::to_string(&cfg)
+        let tmpl = ConfigTemplate::from(&cfg);
+        let yaml = serde_yaml::to_string(&tmpl)
             .map_err(|e| AppError::Config(e.to_string()))?;
         std::fs::write(path, yaml)?;
         Ok(())
@@ -152,4 +152,42 @@ pub struct ConfigOverrides {
     pub http_proxy: Option<String>,
     pub trace: Option<bool>,
     pub tag: Option<String>,
+}
+
+/// Subset of Config fields written by `config -o` template.
+/// Intentionally excludes runtime-only fields (duration, format, output_dir,
+/// tag, http_proxy, trace, prompt_tokens_stddev).
+#[derive(Serialize)]
+struct ConfigTemplate {
+    backend: String,
+    base_url: String,
+    model: String,
+    concurrency: usize,
+    request_count: usize,
+    mode: String,
+    prompt_tokens: usize,
+    output_tokens: usize,
+    no_cache: bool,
+    num_prefix_prompts: usize,
+    cache_rate: usize,
+    seed: i64,
+}
+
+impl From<&Config> for ConfigTemplate {
+    fn from(c: &Config) -> Self {
+        Self {
+            backend: c.backend.clone(),
+            base_url: c.base_url.clone(),
+            model: c.model.clone(),
+            concurrency: c.concurrency,
+            request_count: c.request_count,
+            mode: c.mode.clone(),
+            prompt_tokens: c.prompt_tokens,
+            output_tokens: c.output_tokens,
+            no_cache: c.no_cache,
+            num_prefix_prompts: c.num_prefix_prompts,
+            cache_rate: c.cache_rate,
+            seed: c.seed,
+        }
+    }
 }

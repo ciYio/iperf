@@ -133,6 +133,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         cache_rate: cfg.cache_rate,
         num_prefix_prompts: cfg.num_prefix_prompts,
         interrupted,
+        warmup: args.warmup > 0,
     };
 
     renderer.render(

@@ -29,6 +29,7 @@ pub struct Renderer {
     pub cache_rate: usize,
     pub num_prefix_prompts: usize,
     pub interrupted: bool,
+    pub warmup: bool,
 }
 
 /// JSON output matching Go project's jsonOutput structure
@@ -55,6 +56,8 @@ struct JsonOutput {
     tag: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     interrupted: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    warmup: bool,
 
     // Results
     total_requests: usize,
@@ -201,6 +204,7 @@ impl Renderer {
             num_prefix_prompts: self.num_prefix_prompts,
             tag: self.tag.clone(),
             interrupted: self.interrupted,
+            warmup: self.warmup,
             total_requests: total,
             errors,
             requests_per_sec: stats.requests_per_sec,

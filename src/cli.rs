@@ -77,6 +77,9 @@ pub struct RunArgs {
     /// Debug: print first request/response
     #[arg(long)]
     pub trace: bool,
+    /// Warmup requests per worker (not counted in results)
+    #[arg(long, default_value_t = 0)]
+    pub warmup: usize,
     /// Tag for results
     #[arg(long)]
     pub tag: Option<String>,
