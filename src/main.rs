@@ -25,8 +25,20 @@ pub const BUILT: &str = match option_env!("IPERF_BUILT") {
     None => "unknown",
 };
 
+// Full version string for --version flag
+pub fn version_string() -> String {
+    format!("{} (commit: {}, built at: {})", VERSION, COMMIT, BUILT)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Handle --version before clap parsing
+    if std::env::args().nth(1).as_deref() == Some("--version") ||
+       std::env::args().nth(1).as_deref() == Some("-V") {
+        println!("{}", version_string());
+        return Ok(());
+    }
+
     backend::init_backends();
 
     let cli = Cli::parse();
