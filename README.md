@@ -21,11 +21,7 @@ cargo build --release
 # 二进制文件在 target/release/iperf
 ```
 
-构建时注入版本信息：
-
-```bash
-IPERF_COMMIT=$(git rev-parse --short HEAD) IPERF_BUILT=$(date -u) cargo build --release
-```
+构建时自动通过 `build.rs` 注入版本信息，无需手动设置环境变量。
 
 ## 快速开始
 
@@ -71,9 +67,9 @@ Options:
   -f, --format <FORMAT>                输出格式: table, json [default: table]
       --output-dir <DIR>               JSONL 输出目录 [default: 二进制同级 output/]
       --http-proxy <URL>               HTTP 代理
-      --trace                          调试: 打印第一个请求/响应
+      --trace                          输出 curl 命令并退出（不执行压测）
+      --warmup                         标记为预热（输出带 warmup: true）
       --tag <TAG>                      结果标签
-      --warmup <N>                     预热请求数（不计入统计）
 ```
 
 ### `iperf config` — 生成默认配置
@@ -82,30 +78,19 @@ Options:
 iperf config -o config.yaml
 ```
 
+`config -o` 生成精简版配置模板，仅包含常用字段。
+
+### `iperf watch` — 实时监控
+
+详见 [watch/README.md](src/watch/README.md)
+
 ### `iperf hub download` — 下载模型
 
-```bash
-# 从 HuggingFace 下载
-iperf hub download meta-llama/Llama-3-8B --local-dir ./models/llama3
-
-# 从自定义 hub 下载
-iperf hub download my-model --source http://my-hub:8080
-
-# 下载模型文件,一般用于多台机器同时下载,每个机器下载不同的文件
-iperf hub download meta-llama/Llama-3-8B --offset 5 --count 10
-```
+详见 [src/download/README.md](src/download/README.md)
 
 ### `iperf hub serve` — 模型文件服务
-多台机器下载模型文件后,启动模型文件服务,其他机器可以访问模型文件,用于合并模型文件。
 
-```bash
-iperf hub serve --local-dir ./models --addr 0.0.0.0:8080
-```
-
-API:
-- `GET /` — 模型列表
-- `GET /models/{id}` — 文件列表
-- `GET /models/{id}/{file}` — 下载文件（支持 Range）
+详见 [src/hub/README.md](src/hub/README.md)
 
 ## 配置文件
 
@@ -113,8 +98,7 @@ API:
 backend: vllm
 base_url: http://localhost:8000/v1
 model: qwen/qwen2.5-7b-instruct
-concurrent: 4
-duration_secs: 300
+concurrency: 4
 request_count: 0          # 0 = 不限制
 mode: stream
 prompt_tokens: 256
@@ -123,16 +107,9 @@ no_cache: false
 num_prefix_prompts: 100
 cache_rate: 0
 seed: 0
-prompt_stddev: 0
-format: table
-output_dir: ./output
-tag: ""
-http_proxy: ""
-trace: false
-warmup: 0
 ```
 
-CLI 参数优先级高于配置文件。只在 CLI 显式指定时才覆盖配置。
+`config -o` 生成精简版配置模板。CLI 参数优先级高于配置文件。
 
 ## 输出指标
 
@@ -210,6 +187,16 @@ iperf run -m "model-name" --request-count 100 --num-prefix-prompts 1 http://loca
 
 结果自动追加到 `{output_dir}/{model_name}.jsonl`（或 `{model_name}-{tag}.jsonl`）。
 
+**预热标记** — 使用 `--warmup` 时，JSONL 记录包含 `warmup: true`。
+
+### Trace 模式
+
+生成可直接执行的 curl 命令，用于调试：
+
+```bash
+iperf run -m "model-name" --trace --prompt-tokens 512 --output-tokens 128
+```
+
 ## 架构
 
 ```
@@ -240,8 +227,15 @@ src/
 
 - `--request-count N` — 完成 N 个请求后停止（优先级最高）
 - `--duration Ds` — 到达时长后停止
-- 两者都不设 — 默认 duration=3600s
-- `--request-count` 和 `--duration` 同时设置时，`--request-count` 优先，`--duration` 被忽略
+- 两者都不设 — 运行直到 Ctrl+C（`duration=0` 表示无限制）
+- `--request-count` 和 `--duration` 同时设置时，`--request-count` 优先
+
+## 版本信息
+
+```bash
+iperf --version
+# 输出: 0.1.6 (commit: d097b05, built at: 2026-06-26 09:56:37)
+```
 
 ## License
 
