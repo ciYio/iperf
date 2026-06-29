@@ -13,7 +13,7 @@ linux:
 	cargo zigbuild --release --target x86_64-unknown-linux-musl
 
 upload: linux
-	curl -X POST "http://update.scythefly.top:61910/upload?dst=binary/iperf" \
+	curl -X POST "http://${UPLOAD_HOST}/upload?dst=binary/iperf" \
 		-F "file=@${LINUXDIR}/${TARGET}" \
 		-H "Content-Type: multipart/form-data"
 

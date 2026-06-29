@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use axum::{
     Router,
     extract::{Path as AxumPath, State},
@@ -89,15 +90,28 @@ async fn serve_file(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    // Prevent path traversal
+    let canonical = match full_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let models_root = match state.models_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    if !canonical.starts_with(&models_root) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
     // Handle Range requests
     if let Some(range) = headers.get("range").and_then(|v| v.to_str().ok()) {
-        if let Some(response) = serve_range(&full_path, range) {
+        if let Some(response) = serve_range(&canonical, range).await {
             return response;
         }
     }
 
-    // Serve full file
-    match tokio::fs::read(&full_path).await {
+    // Serve full file (async, non-blocking)
+    match tokio::fs::read(&canonical).await {
         Ok(data) => {
             let mut resp = data.into_response();
             resp.headers_mut().insert(
@@ -110,24 +124,22 @@ async fn serve_file(
     }
 }
 
-fn serve_range(path: &Path, range: &str) -> Option<Response> {
+async fn serve_range(path: &Path, range: &str) -> Option<Response> {
     // Parse "bytes=START-END" or "bytes=START-"
     let range = range.strip_prefix("bytes=")?;
     let parts: Vec<&str> = range.split('-').collect();
     let start: u64 = parts.first()?.parse().ok()?;
     let end: Option<u64> = parts.get(1).and_then(|s| if s.is_empty() { None } else { s.parse().ok() });
 
-    let file_size = std::fs::metadata(path).ok()?.len();
+    let file_size = tokio::fs::metadata(path).await.ok()?.len();
     let end = end.unwrap_or(file_size - 1).min(file_size - 1);
     let content_length = end - start + 1;
 
-    let file = std::fs::File::open(path).ok()?;
-    use std::io::{Read, Seek};
-    let mut file = file;
-    file.seek(std::io::SeekFrom::Start(start)).ok()?;
+    let mut file = tokio::fs::File::open(path).await.ok()?;
+    file.seek(std::io::SeekFrom::Start(start)).await.ok()?;
 
     let mut buf = vec![0u8; content_length as usize];
-    file.read_exact(&mut buf).ok()?;
+    file.read_exact(&mut buf).await.ok()?;
 
     let mut resp = buf.into_response();
     *resp.status_mut() = StatusCode::PARTIAL_CONTENT;

@@ -110,7 +110,7 @@ impl Downloader {
         // Check .part file for resume
         let mut offset = 0u64;
         if part_path.exists() {
-            offset = std::fs::metadata(&part_path)?.len();
+            offset = tokio::fs::metadata(&part_path).await?.len();
         }
 
         // HEAD request to get total size
@@ -138,7 +138,7 @@ impl Downloader {
                     eprintln!("  [{}/{}] {} attempt {}/{}: {e}",
                         file_idx + 1, total, filename, attempt, MAX_RETRIES);
                     // Update offset for resume
-                    offset = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+                    offset = tokio::fs::metadata(&part_path).await.map(|m| m.len()).unwrap_or(0);
                     if attempt < MAX_RETRIES {
                         tokio::time::sleep(Duration::from_secs(attempt as u64)).await;
                     }
@@ -178,16 +178,17 @@ impl Downloader {
                 file_idx + 1, total, filename))
             .unwrap_or_else(|_| ProgressStyle::default_bar()));
 
-        let mut file = std::fs::OpenOptions::new()
+        let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(part_path)?;
+            .open(part_path)
+            .await?;
 
         let mut stream = resp.bytes_stream();
-        use std::io::Write;
+        use tokio::io::AsyncWriteExt;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
-            file.write_all(&chunk)?;
+            file.write_all(&chunk).await?;
             pb.inc(chunk.len() as u64);
         }
         pb.finish();

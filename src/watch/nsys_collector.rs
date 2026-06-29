@@ -94,10 +94,7 @@ async fn stop_nsys_gracefully(child: &mut Child) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
         if let Some(pid) = child.id() {
-            unsafe {
-                unsafe extern "C" { fn kill(pid: i32, sig: i32) -> i32; }
-                kill(pid as i32, 2); // SIGINT = 2
-            }
+            unsafe { libc::kill(pid as i32, libc::SIGINT); }
         }
         let _ = child.wait().await;
     }
