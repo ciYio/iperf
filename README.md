@@ -21,34 +21,6 @@ cargo build --release
 # 二进制文件在 target/release/iperf
 ```
 
-构建时自动通过 `build.rs` 注入版本信息，无需手动设置环境变量。
-
-## CI/CD 自动构建
-
-GitHub Actions 会在推送标签时自动构建 Linux x86_64 二进制文件并上传到 Releases。
-
-**触发条件：** 推送 `v*` 格式标签（如 `v0.1.7`）
-
-**构建流程：**
-1. 推送标签到 GitHub
-2. GitHub Actions 自动编译 `x86_64-unknown-linux-musl` 目标
-3. 创建 GitHub Release，名称为 `iperf {tag}`
-4. 上传二进制文件：`iperf-{tag}-linux-amd64`
-
-**手动触发示例：**
-```bash
-# 创建并推送标签
-git tag v0.1.8
-git push origin v0.1.8
-```
-
-**下载预构建二进制：**
-```bash
-# 从 GitHub Releases 下载
-curl -L -o iperf https://github.com/ciYio/iperf/releases/download/v0.1.8/iperf-v0.1.8-linux-amd64
-chmod +x iperf
-```
-
 ## 快速开始
 
 ```bash
@@ -303,13 +275,6 @@ src/
 - `--duration Ds` — 到达时长后停止
 - 两者都不设 — 运行直到 Ctrl+C（`duration=0` 表示无限制）
 - `--request-count` 和 `--duration` 同时设置时，`--request-count` 优先
-
-## 版本信息
-
-```bash
-iperf --version
-# 输出: 0.1.6 (commit: d097b05, built at: 2026-06-26 09:56:37)
-```
 
 ## License
 
