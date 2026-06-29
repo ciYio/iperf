@@ -255,11 +255,6 @@ impl Backend for OpenAIBackend {
 
             // Process complete lines
             while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n" || w == b"\r\n") {
-                // If we already saw finish_reason, break after processing one more chunk
-                if done {
-                    break;
-                }
-
                 // Find the actual line ending - scan for \n
                 let line_end = buf[..pos + 2].iter().position(|&b| b == b'\n').unwrap() + 1;
                 let line_bytes: Vec<u8> = buf.drain(..line_end).collect();
@@ -285,6 +280,11 @@ impl Backend for OpenAIBackend {
                     server_prompt_tokens = usage.prompt_tokens;
                     server_cached_tokens = usage.prompt_tokens_details.as_ref().map(|d| d.cached_tokens).unwrap_or(0);
                     usage_seen = true;
+                }
+
+                // After finish_reason or seeing usage, we can break
+                if done || usage_seen {
+                    break;
                 }
 
                 if chunk.choices.is_empty() {

@@ -35,6 +35,7 @@ pub struct BenchResult {
     pub samples: Vec<Sample>,
     pub errors: usize,
     pub total_requests: usize,
+    pub usage_count: usize,  // 收到 server usage 的请求数
     #[allow(dead_code)]
     pub wall_clock: Duration,
 }
@@ -45,6 +46,8 @@ impl Runner {
         let error_count = Arc::new(AtomicUsize::new(0));
         let total_count = Arc::new(AtomicUsize::new(0)); // 用于领取请求编号
         let completed_count = Arc::new(AtomicUsize::new(0)); // 用于进度条显示
+        let usage_missing_count = Arc::new(AtomicUsize::new(0)); // 追踪 server usage 缺失的次数
+        let usage_received_count = Arc::new(AtomicUsize::new(0)); // 追踪收到 server usage 的次数
         // duration=0 → no deadline (run until Ctrl+C or request_count)
         let deadline = if self.duration > Duration::ZERO {
             Some(Instant::now() + self.duration)
@@ -107,6 +110,8 @@ impl Runner {
             let error_count = error_count.clone();
             let total_count = total_count.clone();
             let completed_count = completed_count.clone();
+            let usage_missing_count = usage_missing_count.clone();
+            let usage_received_count = usage_received_count.clone();
             let prompt_gen = prompt_gen.clone();
             let system_prompt_gen = self.system_prompt_gen.clone();
             let cancel = cancel.clone();
@@ -195,6 +200,13 @@ impl Runner {
                             // Estimate prompt_tokens if server didn't return usage
                             if resp.timing.prompt_tokens == 0 {
                                 resp.timing.prompt_tokens = prompt_char_len / 4; // ~4 chars per token
+                                // Warn on first occurrence
+                                if usage_missing_count.fetch_add(1, Ordering::Relaxed) == 0 {
+                                    eprintln!("[warn] Server usage not received, using local estimation for prompt_tokens");
+                                }
+                            } else {
+                                // Server returned usage data
+                                usage_received_count.fetch_add(1, Ordering::Relaxed);
                             }
                             collector.add(resp.timing.to_sample());
                         }
@@ -235,6 +247,7 @@ impl Runner {
         let samples = collector.samples();
         let errors = error_count.load(Ordering::Relaxed);
         let total_requests = total_count.load(Ordering::Relaxed);
+        let usage_count = usage_received_count.load(Ordering::Relaxed);
 
         let stats = calc_stats(&samples, wall_clock);
         let pd = calc_prefill_decode(&samples, wall_clock);
@@ -245,6 +258,7 @@ impl Runner {
             samples,
             errors,
             total_requests,
+            usage_count,
             wall_clock,
         })
     }

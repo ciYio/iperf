@@ -61,6 +61,7 @@ struct JsonOutput {
 
     // Results
     total_requests: usize,
+    usage_count: usize,
     errors: usize,
     requests_per_sec: f64,
 
@@ -139,14 +140,14 @@ pub fn format_tpm(tpm: f64) -> String {
 }
 
 impl Renderer {
-    pub fn render(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize) -> Result<()> {
+    pub fn render(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize, usage_count: usize) -> Result<()> {
         match self.format.as_str() {
-            "json" => self.render_json(stats, pd, errors, total),
-            _ => self.render_table(stats, pd, errors, total),
+            "json" => self.render_json(stats, pd, errors, total, usage_count),
+            _ => self.render_table(stats, pd, errors, total, usage_count),
         }
     }
 
-    fn render_table(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize) -> Result<()> {
+    fn render_table(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize, usage_count: usize) -> Result<()> {
         println!();
         if self.interrupted {
             println!("IPERF Benchmark Results (interrupted)");
@@ -154,7 +155,7 @@ impl Renderer {
             println!("IPERF Benchmark Results");
         }
         println!();
-        println!("  Requests:        {}/{} (success/total)", stats.total_requests, total);
+        println!("  Requests:        {}/{} (success/total), usage: {}", stats.total_requests, total, usage_count);
         println!("  Throughput:      {:.2} req/sec", stats.requests_per_sec);
         println!();
         println!("  Latency (TTFT)");
@@ -189,7 +190,7 @@ impl Renderer {
         Ok(())
     }
 
-    fn build_json(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize) -> JsonOutput {
+    fn build_json(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize, usage_count: usize) -> JsonOutput {
         JsonOutput {
             backend: self.backend.clone(),
             model: self.model.clone(),
@@ -206,6 +207,7 @@ impl Renderer {
             interrupted: self.interrupted,
             warmup: self.warmup,
             total_requests: total,
+            usage_count,
             errors,
             requests_per_sec: stats.requests_per_sec,
             ttft_mean: fmt_dur(stats.ttft_mean),
@@ -232,18 +234,18 @@ impl Renderer {
         }
     }
 
-    fn render_json(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize) -> Result<()> {
-        let output = self.build_json(stats, pd, errors, total);
+    fn render_json(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize, usage_count: usize) -> Result<()> {
+        let output = self.build_json(stats, pd, errors, total, usage_count);
         let json = serde_json::to_string_pretty(&output)?;
         println!("{json}");
         Ok(())
     }
 
-    pub fn render_jsonl(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize) -> Result<()> {
+    pub fn render_jsonl(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize, usage_count: usize) -> Result<()> {
         let dir = Path::new(&self.output_dir);
         fs::create_dir_all(dir)?;
 
-        let output = self.build_json(stats, pd, errors, total);
+        let output = self.build_json(stats, pd, errors, total, usage_count);
 
         // Sanitize model name: replace '/' with '_'
         let model_name = self.model.replace('/', "_");

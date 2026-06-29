@@ -253,12 +253,14 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         &result.prefill_decode,
         result.errors,
         result.total_requests,
+        result.usage_count,
     )?;
     renderer.render_jsonl(
         &result.stats,
         &result.prefill_decode,
         result.errors,
         result.total_requests,
+        result.usage_count,
     )?;
 
     Ok(())
