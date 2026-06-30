@@ -66,6 +66,24 @@ async fn cmd_hub_download(args: cli::HubDownloadArgs) -> anyhow::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(format!("./models/{}", args.model_id.replace('/', "_"))));
 
+    // Parse role parameter (e.g. "1/4", "2/4")
+    let (offset, count) = if let Some(ref role) = args.role {
+        let parts: Vec<&str> = role.split('/').collect();
+        if parts.len() != 2 {
+            anyhow::bail!("Invalid role format: {}, expected 'N/M' (e.g. '1/4')", role);
+        }
+        let current: usize = parts[0].parse().map_err(|_| anyhow::anyhow!("Invalid role number: {}", parts[0]))?;
+        let total: usize = parts[1].parse().map_err(|_| anyhow::anyhow!("Invalid role total: {}", parts[1]))?;
+        if current == 0 || current > total {
+            anyhow::bail!("Role {} out of range 1..={}", current, total);
+        }
+        // We'll calculate actual offset/count after getting file list
+        // For now, return special values that will be handled later
+        (current, total)
+    } else {
+        (0, 0)  // Not using role
+    };
+
     if let Some(ref source) = args.source {
         let mut dl = HubDownloader::new(
             source,
@@ -73,8 +91,12 @@ async fn cmd_hub_download(args: cli::HubDownloadArgs) -> anyhow::Result<()> {
             &dest_dir,
             args.http_proxy.as_deref(),
         );
-        dl.offset = args.offset;
-        dl.count = args.count;
+        if args.role.is_some() {
+            dl.role = Some((offset, count));
+        } else {
+            dl.offset = args.offset;
+            dl.count = args.count;
+        }
         dl.download_all().await?;
     } else {
         let mut dl = Downloader::new(
@@ -83,8 +105,12 @@ async fn cmd_hub_download(args: cli::HubDownloadArgs) -> anyhow::Result<()> {
             &dest_dir,
             args.http_proxy.as_deref(),
         );
-        dl.offset = args.offset;
-        dl.count = args.count;
+        if args.role.is_some() {
+            dl.role = Some((offset, count));
+        } else {
+            dl.offset = args.offset;
+            dl.count = args.count;
+        }
         dl.download_all().await?;
     }
 

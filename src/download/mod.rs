@@ -31,6 +31,7 @@ pub struct Downloader {
     pub proxy: Option<String>,
     pub offset: usize,
     pub count: usize,
+    pub role: Option<(usize, usize)>,  // (current, total) e.g. (1, 4)
 }
 
 impl Downloader {
@@ -42,11 +43,14 @@ impl Downloader {
             proxy: proxy.map(String::from),
             offset: 0,
             count: 0,
+            role: None,
         }
     }
 
     fn new_client(&self) -> Result<Client> {
-        let mut builder = Client::builder().timeout(Duration::from_secs(300));
+        let mut builder = Client::builder()
+            .timeout(Duration::from_secs(300))
+            .danger_accept_invalid_certs(true);
         if let Some(ref proxy) = self.proxy {
             builder = builder.proxy(reqwest::Proxy::all(proxy)?);
         }
@@ -68,20 +72,52 @@ impl Downloader {
     }
 
     pub async fn download_all(&self) -> Result<()> {
-        let mut files = self.list_files().await?;
-        if self.offset > 0 {
-            files = files.into_iter().skip(self.offset).collect();
-        }
-        if self.count > 0 {
-            files.truncate(self.count);
+        let files = self.list_files().await?;
+
+        // Separate safetensors and other files
+        let (safetensors_files, other_files): (Vec<_>, Vec<_>) = files.into_iter()
+            .partition(|f| f.ends_with(".safetensors"));
+
+        // Handle role-based offset/count
+        let (download_safetensors, safetensors_offset, safetensors_count) = if let Some((current, total_parts)) = self.role {
+            let chunk_size = safetensors_files.len().div_ceil(total_parts);
+            let offset = (current - 1) * chunk_size;
+            // Role 1 downloads all other files + first chunk of safetensors
+            (true, offset, chunk_size)
+        } else {
+            (true, self.offset, self.count)
+        };
+
+        // Build final file list
+        let mut final_files: Vec<String> = Vec::new();
+
+        // If this is role 1 (or no role), download all non-safetensors files first
+        if let Some((current, _)) = self.role {
+            if current == 1 {
+                final_files.extend(other_files);
+            }
+        } else {
+            // No role: download everything
+            final_files.extend(other_files);
         }
 
-        let total = files.len();
+        // Add safetensors chunk
+        if download_safetensors {
+            let iter = safetensors_files.into_iter().skip(safetensors_offset);
+            let safetensors_chunk: Vec<String> = if safetensors_count > 0 {
+                iter.take(safetensors_count).collect()
+            } else {
+                iter.collect()  // count=0 means take all
+            };
+            final_files.extend(safetensors_chunk);
+        }
+
+        let total = final_files.len();
         eprintln!("Downloading {} files for {}", total, self.model_id);
 
         std::fs::create_dir_all(&self.dest_dir)?;
 
-        for (idx, file) in files.iter().enumerate() {
+        for (idx, file) in final_files.iter().enumerate() {
             if let Err(e) = self.download_file(file, idx, total).await {
                 eprintln!("  Failed to download {file}: {e}");
             }
@@ -91,7 +127,7 @@ impl Downloader {
 
     async fn download_file(&self, filename: &str, file_idx: usize, total: usize) -> Result<()> {
         let dest = self.dest_dir.join(filename);
-        let part_path = dest.with_extension("part");
+        let part_path = PathBuf::from(format!("{}.part", dest.display()));
 
         // Create parent directory
         if let Some(parent) = dest.parent() {
@@ -173,6 +209,8 @@ impl Downloader {
             .unwrap_or(0);
 
         let pb = ProgressBar::new(total_size + offset);
+        pb.set_position(offset);
+        pb.reset_elapsed();  // 重置计时器，速度只算本次下载
         pb.set_style(ProgressStyle::default_bar()
             .template(&format!("  [{}/{}] {} [{{bar:30}}] {{bytes}}/{{total_bytes}} ({{bytes_per_sec}})",
                 file_idx + 1, total, filename))
@@ -205,6 +243,7 @@ pub struct HubDownloader {
     pub proxy: Option<String>,
     pub offset: usize,
     pub count: usize,
+    pub role: Option<(usize, usize)>,  // (current, total) e.g. (1, 4)
 }
 
 impl HubDownloader {
@@ -216,11 +255,14 @@ impl HubDownloader {
             proxy: proxy.map(String::from),
             offset: 0,
             count: 0,
+            role: None,
         }
     }
 
     fn new_client(&self) -> Result<Client> {
-        let mut builder = Client::builder().timeout(Duration::from_secs(300));
+        let mut builder = Client::builder()
+            .timeout(Duration::from_secs(300))
+            .danger_accept_invalid_certs(true);
         if let Some(ref proxy) = self.proxy {
             builder = builder.proxy(reqwest::Proxy::all(proxy)?);
         }
@@ -239,20 +281,51 @@ impl HubDownloader {
     }
 
     pub async fn download_all(&self) -> Result<()> {
-        let mut files = self.list_files().await?;
-        if self.offset > 0 {
-            files = files.into_iter().skip(self.offset).collect();
-        }
-        if self.count > 0 {
-            files.truncate(self.count);
+        let files = self.list_files().await?;
+
+        // Separate safetensors and other files
+        let (safetensors_files, other_files): (Vec<_>, Vec<_>) = files.into_iter()
+            .partition(|f| f.ends_with(".safetensors"));
+
+        // Handle role-based offset/count
+        let (download_safetensors, safetensors_offset, safetensors_count) = if let Some((current, total_parts)) = self.role {
+            let chunk_size = safetensors_files.len().div_ceil(total_parts);
+            let offset = (current - 1) * chunk_size;
+            (true, offset, chunk_size)
+        } else {
+            (true, self.offset, self.count)
+        };
+
+        // Build final file list
+        let mut final_files: Vec<String> = Vec::new();
+
+        // If this is role 1 (or no role), download all non-safetensors files first
+        if let Some((current, _)) = self.role {
+            if current == 1 {
+                final_files.extend(other_files);
+            }
+        } else {
+            // No role: download everything
+            final_files.extend(other_files);
         }
 
-        let total = files.len();
+        // Add safetensors chunk
+        if download_safetensors {
+            let iter = safetensors_files.into_iter().skip(safetensors_offset);
+            let safetensors_chunk: Vec<String> = if safetensors_count > 0 {
+                iter.take(safetensors_count).collect()
+            } else {
+                iter.collect()  // count=0 means take all
+            };
+            final_files.extend(safetensors_chunk);
+        }
+
+        let total = final_files.len();
         eprintln!("Downloading {} files for {} from {}", total, self.model_id, self.base_url);
 
         std::fs::create_dir_all(&self.dest_dir)?;
 
-        for (idx, file) in files.iter().enumerate() {
+        for (idx, file) in final_files.iter().enumerate() {
             let dest = self.dest_dir.join(file);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)?;

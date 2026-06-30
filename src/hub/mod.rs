@@ -22,8 +22,7 @@ pub async fn serve(models_dir: &str, addr: &str) -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/", get(list_models))
-        .route("/models/{model_id}", get(list_files))
-        .route("/models/{model_id}/{*file}", get(serve_file))
+        .route("/models/*model_path", get(list_files_or_serve))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -50,41 +49,43 @@ async fn list_models(
     Json(json!(models))
 }
 
-async fn list_files(
+async fn list_files_or_serve(
     State(state): State<HubState>,
-    AxumPath(model_id): AxumPath<String>,
-) -> Json<serde_json::Value> {
-    let dir = state.models_dir.join(&model_id);
-    let files = walk_files(&dir, &dir);
-    Json(json!(files))
-}
-
-fn walk_files(root: &Path, prefix: &Path) -> Vec<String> {
-    let mut files = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let name = path.file_name().unwrap_or_default().to_string_lossy();
-                if name == ".cache" || name.starts_with('.') {
-                    continue;
-                }
-                files.extend(walk_files(&path, prefix));
-            } else {
-                let rel = path.strip_prefix(prefix).unwrap_or(&path);
-                files.push(rel.to_string_lossy().to_string());
-            }
-        }
-    }
-    files
-}
-
-async fn serve_file(
-    State(state): State<HubState>,
-    AxumPath((model_id, file)): AxumPath<(String, String)>,
+    AxumPath(model_path): AxumPath<String>,
     headers: HeaderMap,
 ) -> Response {
-    let full_path = state.models_dir.join(&model_id).join(&file);
+    // model_path is like "Qwen/Qwen3-ForcedAligner-0.6B-hf" or "Qwen/Qwen3-ForcedAligner-0.6B-hf/file.txt"
+    let parts: Vec<&str> = model_path.splitn(2, '/').collect();
+    if parts.len() < 2 {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    // Check if it's a file request (model_path contains a file)
+    let model_id = parts[0];
+    let rest = parts[1];
+
+    // Check if rest contains another slash (it's a file path)
+    if let Some(slash_pos) = rest.find('/') {
+        // It's a file request: model_id/file_path
+        let file = &rest[slash_pos + 1..];
+        let file_model_id = &rest[..slash_pos];
+        let full_model_id = format!("{}/{}", model_id, file_model_id);
+        return serve_file_by_path(&state, &full_model_id, file, headers).await;
+    }
+
+    // It's a list request: just model_id
+    let dir = state.models_dir.join(&model_path);
+    let files = walk_files(&dir, &dir);
+    Json(json!(files)).into_response()
+}
+
+async fn serve_file_by_path(
+    state: &HubState,
+    model_id: &str,
+    file: &str,
+    headers: HeaderMap,
+) -> Response {
+    let full_path = state.models_dir.join(model_id).join(file);
 
     if !full_path.exists() || !full_path.is_file() {
         return StatusCode::NOT_FOUND.into_response();
@@ -122,6 +123,26 @@ async fn serve_file(
         }
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
+}
+
+fn walk_files(root: &Path, prefix: &Path) -> Vec<String> {
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                if name == ".cache" || name.starts_with('.') {
+                    continue;
+                }
+                files.extend(walk_files(&path, prefix));
+            } else {
+                let rel = path.strip_prefix(prefix).unwrap_or(&path);
+                files.push(rel.to_string_lossy().to_string());
+            }
+        }
+    }
+    files
 }
 
 async fn serve_range(path: &Path, range: &str) -> Option<Response> {

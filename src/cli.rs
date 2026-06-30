@@ -166,6 +166,9 @@ pub struct HubDownloadArgs {
     /// Download N files (0 = all)
     #[arg(long, default_value_t = 0)]
     pub count: usize,
+    /// Role for distributed download (e.g. "1/4", "2/4")
+    #[arg(long)]
+    pub role: Option<String>,
 }
 
 #[derive(clap::Args)]

@@ -37,6 +37,7 @@ impl OpenAIBackend {
                 self.client = Client::builder()
                     .http1_only()
                     .timeout(HTTP_TIMEOUT)
+                    .danger_accept_invalid_certs(true)
                     .proxy(proxy)
                     .build()
                     .unwrap_or(self.client);
@@ -197,7 +198,7 @@ impl Backend for OpenAIBackend {
                 prompt_tokens,
                 output_tokens,
                 cached_tokens,
-                tpot: if output_tokens > 0 { total_dur / output_tokens as u32 } else { Duration::ZERO },
+                tpot: if output_tokens > 1 { total_dur / output_tokens as u32 } else { Duration::ZERO },
                 token_timings: vec![],
             },
         })
@@ -334,8 +335,8 @@ impl Backend for OpenAIBackend {
         let total_dur = start.elapsed();
         let ttft = first_token_at.unwrap_or(total_dur);
         let decode_dur = total_dur - ttft;
-        let tpot = if token_count > 1 {
-            decode_dur / (token_count - 1) as u32
+        let tpot = if server_output_tokens > 1 {
+            decode_dur / (server_output_tokens - 1) as u32
         } else {
             Duration::ZERO
         };
