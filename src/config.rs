@@ -44,6 +44,8 @@ pub struct Config {
     pub tag: String,
     #[serde(default)]
     pub http_proxy: String,
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
     #[serde(default)]
     pub trace: Option<usize>,
 }
@@ -58,6 +60,7 @@ fn default_output_tokens() -> usize { 256 }
 fn default_num_prefix_prompts() -> usize { 100 }
 fn default_num_system_prompts() -> usize { 1 }
 fn default_format() -> String { "table".into() }
+fn default_timeout() -> u64 { 720 }
 fn default_output_dir() -> String {
     // Default output dir is next to the iperf binary
     std::env::current_exe()
@@ -90,6 +93,7 @@ impl Default for Config {
             output_dir: default_output_dir(),
             tag: String::new(),
             http_proxy: String::new(),
+            timeout: default_timeout(),
             trace: None,
         }
     }
@@ -131,6 +135,7 @@ impl Config {
         if let Some(ref v) = o.format       { self.format = v.clone(); }
         if let Some(ref v) = o.output_dir   { self.output_dir = v.clone(); }
         if let Some(ref v) = o.http_proxy   { self.http_proxy = v.clone(); }
+        if let Some(v) = o.timeout          { self.timeout = v; }
         if let Some(v) = o.trace            { self.trace = Some(v); }
         if let Some(ref v) = o.tag          { self.tag = v.clone(); }
     }
@@ -161,6 +166,7 @@ pub struct ConfigOverrides {
     pub format: Option<String>,
     pub output_dir: Option<String>,
     pub http_proxy: Option<String>,
+    pub timeout: Option<u64>,
     pub trace: Option<usize>,
     pub tag: Option<String>,
 }

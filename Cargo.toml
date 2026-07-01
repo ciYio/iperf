@@ -1,6 +1,6 @@
 [package]
 name = "iperf"
-version = "0.1.10"
+version = "0.1.11-pre1"
 edition = "2024"
 license = "MIT"
 description = "AI inference backend performance benchmark"

@@ -68,7 +68,12 @@ pub fn calc_stats(samples: &[Sample], wall_clock: Duration) -> Stats {
 
     let n = samples.len();
 
-    let mut ttfts: Vec<Duration> = samples.iter().map(|s| s.ttft).collect();
+    // Filter samples for TTFT calculation: only include samples with actual tokens
+    let ttft_samples: Vec<&Sample> = samples.iter()
+        .filter(|s| s.output_tokens > 0)
+        .collect();
+
+    let mut ttfts: Vec<Duration> = ttft_samples.iter().map(|s| s.ttft).collect();
 
     // Collect ALL per-token inter-token latencies for accurate TPOT percentiles
     let mut all_token_latencies: Vec<Duration> = Vec::new();
@@ -83,7 +88,7 @@ pub fn calc_stats(samples: &[Sample], wall_clock: Duration) -> Stats {
             .collect();
     }
 
-    let ttft_sum: Duration = samples.iter().map(|s| s.ttft).sum();
+    let ttft_sum: Duration = ttft_samples.iter().map(|s| s.ttft).sum();
     let tpot_sum: Duration = all_token_latencies.iter().sum();
 
     let total_prompt: usize = samples.iter().map(|s| s.prompt_tokens).sum();
@@ -92,11 +97,14 @@ pub fn calc_stats(samples: &[Sample], wall_clock: Duration) -> Stats {
 
     let wall_secs = wall_clock.as_secs_f64();
 
+    // TTFT mean should only count samples with actual tokens
+    let ttft_count = ttft_samples.len();
+
     Stats {
         total_requests: n,
         total_duration: wall_clock,
         requests_per_sec: safe_div(n as f64, wall_secs),
-        ttft_mean: ttft_sum / n as u32,
+        ttft_mean: if ttft_count > 0 { ttft_sum / ttft_count as u32 } else { Duration::ZERO },
         ttft_p50: percentile(&mut ttfts, 50),
         ttft_p90: percentile(&mut ttfts, 90),
         ttft_p95: percentile(&mut ttfts, 95),

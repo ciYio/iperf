@@ -162,7 +162,7 @@ impl Runner {
                         req.no_cache = no_cache;
                         (req, prompt_char_len)
                     } else {
-                        // No system prompt: use next() for backward compatibility
+                        // No system prompt pool: add minimal system prompt to encourage longer output
                         let prompt = prompt_gen.next();
                         let prompt = if !no_cache && (1..=99).contains(&cache_rate) {
                             insert_cache_breaker(&prompt, cache_rate)
@@ -170,7 +170,8 @@ impl Runner {
                             prompt
                         };
                         let prompt_char_len = prompt.len();
-                        let mut req = new_benchmark_request(&model, &prompt, max_tokens);
+                        let sys_prompt = "Please continue writing extensively, as much as possible.".to_string();
+                        let mut req = new_benchmark_request_with_system(&model, &sys_prompt, &prompt, max_tokens);
                         req.no_cache = no_cache;
                         (req, prompt_char_len)
                     };

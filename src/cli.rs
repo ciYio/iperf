@@ -80,6 +80,9 @@ pub struct RunArgs {
     /// HTTP proxy URL
     #[arg(long)]
     pub http_proxy: Option<String>,
+    /// Request timeout in seconds (default: 720)
+    #[arg(long)]
+    pub timeout: Option<u64>,
     /// Print a copy-pasteable curl command and exit (no benchmark).
     /// Optional value: show the Nth request (default: 1)
     #[arg(long, num_args = 0..=1, default_missing_value = "1")]
@@ -90,6 +93,9 @@ pub struct RunArgs {
     /// Tag for results
     #[arg(long)]
     pub tag: Option<String>,
+    /// Show per-request cache hit rate
+    #[arg(long = "per")]
+    pub show_per_request: bool,
     /// Target base URL (positional)
     #[arg(index = 1)]
     pub target: Option<String>,

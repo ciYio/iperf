@@ -110,6 +110,7 @@ impl PromptGenerator {
 
 /// Generates system prompts with a pool of unique variants.
 /// Each variant starts with [NNN] prefix to control prefix cache hit rate.
+/// Includes instruction to encourage longer output (controlled by max_tokens).
 #[derive(Clone)]
 pub struct SystemPromptGenerator {
     prompts: Arc<Vec<String>>,
@@ -120,16 +121,20 @@ impl SystemPromptGenerator {
         let corpus = corpus();
         let mut gen_rng = StdRng::seed_from_u64(seed);
 
+        // Instruction to encourage longer output
+        let output_instruction = " Please continue writing extensively, as much as possible.";
+        let instruction_chars = output_instruction.len();
+
         let char_count = system_prompt_tokens * CHARS_PER_TOKEN;
-        // Reserve space for prefix "[NNN] " (6 chars max for up to 999)
+        // Reserve space for prefix "[NNN] " (6 chars max for up to 999) and instruction
         let prefix_len = 6;
-        let body_len = char_count.saturating_sub(prefix_len);
+        let body_len = char_count.saturating_sub(prefix_len + instruction_chars);
 
         let prompts: Vec<String> = (0..num_system_prompts)
             .map(|i| {
                 let start = gen_rng.gen_range(0..corpus.len().saturating_sub(body_len).max(1));
                 let body: String = corpus[start..start + body_len].iter().collect();
-                format!("[{:03}] {}", i + 1, body)
+                format!("[{:03}] {}{}", i + 1, body, output_instruction)
             })
             .collect();
 
@@ -219,6 +224,9 @@ mod tests {
         assert!(p1.starts_with("[001] "));
         assert!(p2.starts_with("[002] "));
         assert!(p3.starts_with("[003] "));
+        // Each should end with output instruction
+        assert!(p1.ends_with("Please continue writing extensively, as much as possible."));
+        assert!(p2.ends_with("Please continue writing extensively, as much as possible."));
     }
 
     #[test]

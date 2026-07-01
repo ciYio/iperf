@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::error::Result;
 use crate::metrics::stats::Stats;
-use crate::metrics::PrefillDecodeSummary;
+use crate::metrics::{PrefillDecodeSummary, Sample};
 
 pub struct Renderer {
     pub format: String,
@@ -30,6 +30,7 @@ pub struct Renderer {
     pub num_prefix_prompts: usize,
     pub interrupted: bool,
     pub warmup: bool,
+    pub show_per_request: bool,
 }
 
 /// JSON output matching Go project's jsonOutput structure
@@ -140,14 +141,14 @@ pub fn format_tpm(tpm: f64) -> String {
 }
 
 impl Renderer {
-    pub fn render(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize, usage_count: usize) -> Result<()> {
+    pub fn render(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize, usage_count: usize, samples: &[Sample]) -> Result<()> {
         match self.format.as_str() {
             "json" => self.render_json(stats, pd, errors, total, usage_count),
-            _ => self.render_table(stats, pd, errors, total, usage_count),
+            _ => self.render_table(stats, pd, errors, total, usage_count, samples),
         }
     }
 
-    fn render_table(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize, usage_count: usize) -> Result<()> {
+    fn render_table(&self, stats: &Stats, pd: &PrefillDecodeSummary, errors: usize, total: usize, usage_count: usize, samples: &[Sample]) -> Result<()> {
         println!();
         if self.interrupted {
             println!("IPERF Benchmark Results (interrupted)");
@@ -187,6 +188,22 @@ impl Renderer {
         }
         println!("  Errors:          {errors}");
         println!();
+
+        // Per-request cache hit rate
+        if self.show_per_request && !samples.is_empty() {
+            println!("Per-request stats:");
+            for (i, s) in samples.iter().enumerate() {
+                let hit_rate = if s.prompt_tokens > 0 {
+                    s.cached_tokens as f64 / s.prompt_tokens as f64 * 100.0
+                } else {
+                    0.0
+                };
+                println!("  #{:<4} prompt={:<6} cached={:<6} hit_rate={:.1}% completion={}",
+                    i + 1, s.prompt_tokens, s.cached_tokens, hit_rate, s.output_tokens);
+            }
+            println!();
+        }
+
         Ok(())
     }
 

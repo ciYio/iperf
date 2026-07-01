@@ -38,6 +38,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         format: args.format.clone(),
         output_dir: args.output_dir.clone(),
         http_proxy: args.http_proxy.clone(),
+        timeout: args.timeout,
         trace: args.trace,
         tag: args.tag.clone(),
     };
@@ -78,6 +79,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     if !cfg.http_proxy.is_empty() {
         eprintln!("  http_proxy: {}", cfg.http_proxy);
     }
+    eprintln!("  timeout: {}s", cfg.timeout);
     if !cfg.tag.is_empty() {
         eprintln!("  tag: {}", cfg.tag);
     }
@@ -87,7 +89,8 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
     eprintln!();
 
     // 3. Create backend
-    let backend_inst = backend::new_backend(&cfg.backend, &cfg.base_url, &cfg.http_proxy)?;
+    let timeout = std::time::Duration::from_secs(cfg.timeout);
+    let backend_inst = backend::new_backend(&cfg.backend, &cfg.base_url, &cfg.http_proxy, timeout)?;
     let backend_arc: Arc<dyn backend::Backend> = Arc::from(backend_inst);
 
     // 4. Create prompt generator
@@ -142,9 +145,13 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
             msg
         } else {
             let user_prompt = prompt_gen.get(idx);
+            let sys_prompt = "Please continue writing extensively, as much as possible.";
             let mut msg = serde_json::json!({
                 "model": cfg.model,
-                "messages": [{"role": "user", "content": user_prompt}],
+                "messages": [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
                 "max_tokens": cfg.output_tokens,
                 "temperature": 0.0,
                 "stream": is_stream
@@ -246,6 +253,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         num_prefix_prompts: cfg.num_prefix_prompts,
         interrupted,
         warmup: args.warmup,
+        show_per_request: args.show_per_request,
     };
 
     renderer.render(
@@ -254,6 +262,7 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
         result.errors,
         result.total_requests,
         result.usage_count,
+        &result.samples,
     )?;
     renderer.render_jsonl(
         &result.stats,

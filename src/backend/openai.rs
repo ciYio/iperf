@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::{Backend, Message, Request, Response, Timing};
 use crate::error::{AppError, Result};
 
-const HTTP_TIMEOUT: Duration = Duration::from_secs(300); // 5 min
+const HTTP_TIMEOUT: Duration = Duration::from_secs(720); // 12 min
 
 pub struct OpenAIBackend {
     base_url: String,
@@ -21,6 +21,7 @@ impl OpenAIBackend {
         let client = Client::builder()
             .http1_only()
             .timeout(HTTP_TIMEOUT)
+            .pool_idle_timeout(Duration::from_secs(1))
             .build()
             .expect("failed to build HTTP client");
 
@@ -37,12 +38,23 @@ impl OpenAIBackend {
                 self.client = Client::builder()
                     .http1_only()
                     .timeout(HTTP_TIMEOUT)
+                    .pool_idle_timeout(Duration::from_secs(1))
                     .danger_accept_invalid_certs(true)
                     .proxy(proxy)
                     .build()
                     .unwrap_or(self.client);
             }
         }
+        self
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.client = Client::builder()
+            .http1_only()
+            .timeout(timeout)
+            .pool_idle_timeout(Duration::from_secs(1))
+            .build()
+            .unwrap_or(self.client);
         self
     }
 
@@ -140,6 +152,15 @@ impl Backend for OpenAIBackend {
             name: self.name.clone(),
             client: self.client.clone(),
         }.with_proxy(proxy);
+        Some(Box::new(new_self))
+    }
+
+    fn with_timeout_opt(&self, timeout: Duration) -> Option<Box<dyn Backend>> {
+        let new_self = OpenAIBackend {
+            base_url: self.base_url.clone(),
+            name: self.name.clone(),
+            client: self.client.clone(),
+        }.with_timeout(timeout);
         Some(Box::new(new_self))
     }
 
@@ -254,83 +275,105 @@ impl Backend for OpenAIBackend {
             let chunk = chunk?;
             buf.extend_from_slice(chunk.chunk());
 
-            // Process complete lines
-            while let Some(pos) = buf.windows(2).position(|w| w == b"\n\n" || w == b"\r\n") {
-                // Find the actual line ending - scan for \n
-                let line_end = buf[..pos + 2].iter().position(|&b| b == b'\n').unwrap() + 1;
-                let line_bytes: Vec<u8> = buf.drain(..line_end).collect();
-                let line = String::from_utf8_lossy(&line_bytes);
-                let line = line.trim();
+            // Process complete SSE events (separated by \n\n or \r\n\r\n)
+            loop {
+                // Find event boundary: \n\n or \r\n\r\n or \r\n\n
+                let event_end = buf.windows(2).position(|w| w == b"\n\n")
+                    .or_else(|| buf.windows(4).position(|w| w == b"\r\n\r\n"))
+                    .or_else(|| buf.windows(3).position(|w| w == b"\r\n\n"));
 
-                if !line.starts_with("data: ") {
-                    continue;
-                }
-                let data = &line[6..];
-                if data == "[DONE]" {
-                    break;
-                }
-
-                let chunk: OpenAIChunk = match serde_json::from_str(data) {
-                    Ok(c) => c,
-                    Err(_) => continue,
+                let Some(pos) = event_end else {
+                    break; // No complete event yet
                 };
 
-                // Capture server usage (usually in final chunk with empty choices)
-                if let Some(usage) = &chunk.usage {
-                    server_output_tokens = usage.completion_tokens;
-                    server_prompt_tokens = usage.prompt_tokens;
-                    server_cached_tokens = usage.prompt_tokens_details.as_ref().map(|d| d.cached_tokens).unwrap_or(0);
-                    usage_seen = true;
-                }
-
-                // After finish_reason or seeing usage, we can break
-                if done || usage_seen {
-                    break;
-                }
-
-                if chunk.choices.is_empty() {
-                    if usage_seen {
-                        break; // got usage, done
-                    }
-                    continue;
-                }
-
-                let delta_content = chunk.choices[0].delta.content.as_deref()
-                    .or(chunk.choices[0].delta.reasoning.as_deref())
-                    .unwrap_or("");
-
-                if delta_content.is_empty() {
-                    if chunk.choices[0].finish_reason.is_some() {
-                        // Signal that we should break after one more iteration
-                        // (to capture usage if it comes in the next chunk)
-                        done = true;
-                        if usage_seen {
-                            break;
-                        }
-                    }
-                    continue;
-                }
-
-                let now = start.elapsed();
-                if token_count == 0 {
-                    first_token_at = Some(now);
-                } else if let Some(last) = last_token_at {
-                    token_timings.push(now - last);
-                }
-
-                content.push_str(delta_content);
-                token_count += 1;
-
-                let inter_token_dur = if token_count > 1 {
-                    last_token_at.map(|l| now - l).unwrap_or(Duration::ZERO)
+                // Determine the actual line ending length
+                let end_len = if pos + 4 <= buf.len() && &buf[pos..pos + 4] == b"\r\n\r\n" {
+                    4
+                } else if pos + 3 <= buf.len() && &buf[pos..pos + 3] == b"\r\n\n" {
+                    3
                 } else {
-                    Duration::ZERO
+                    2 // \n\n
                 };
-                last_token_at = Some(now);
 
-                on_token(delta_content.to_string(), inter_token_dur);
-            }
-        }
+                // Extract event data (everything before the blank line)
+                let event_bytes: Vec<u8> = buf.drain(..pos + end_len).collect();
+                let event_str = String::from_utf8_lossy(&event_bytes);
+
+                // Parse each line in the event
+                for line in event_str.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || !line.starts_with("data:") {
+                        continue;
+                    }
+
+                    // Handle both "data: {...}" and "data:{...}" formats
+                    let data = line[5..].trim_start();
+                    if data == "[DONE]" {
+                        break;
+                    }
+
+                    let chunk: OpenAIChunk = match serde_json::from_str(data) {
+                        Ok(c) => c,
+                        Err(_) => continue,
+                    };
+
+                    // Capture server usage (usually in final chunk with empty choices)
+                    if let Some(usage) = &chunk.usage {
+                        server_output_tokens = usage.completion_tokens;
+                        server_prompt_tokens = usage.prompt_tokens;
+                        server_cached_tokens = usage.prompt_tokens_details.as_ref().map(|d| d.cached_tokens).unwrap_or(0);
+                        usage_seen = true;
+                    }
+
+                    // After finish_reason or seeing usage, we can break
+                    if done || usage_seen {
+                        break;
+                    }
+
+                    if chunk.choices.is_empty() {
+                        if usage_seen {
+                            break; // got usage, done
+                        }
+                        continue;
+                    }
+
+                    let delta_content = chunk.choices[0].delta.content.as_deref()
+                        .or(chunk.choices[0].delta.reasoning.as_deref())
+                        .unwrap_or("");
+
+                    if delta_content.is_empty() {
+                        if chunk.choices[0].finish_reason.is_some() {
+                            // Signal that we should break after one more iteration
+                            // (to capture usage if it comes in the next chunk)
+                            done = true;
+                            if usage_seen {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+
+                    let now = start.elapsed();
+                    if token_count == 0 {
+                        first_token_at = Some(now);
+                    } else if let Some(last) = last_token_at {
+                        token_timings.push(now - last);
+                    }
+
+                    content.push_str(delta_content);
+                    token_count += 1;
+
+                    let inter_token_dur = if token_count > 1 {
+                        last_token_at.map(|l| now - l).unwrap_or(Duration::ZERO)
+                    } else {
+                        Duration::ZERO
+                    };
+                    last_token_at = Some(now);
+
+                    on_token(delta_content.to_string(), inter_token_dur);
+                } // end for line in event_str.lines()
+            } // end loop (process complete events)
+        } // end while let Some(chunk)
 
         let total_dur = start.elapsed();
         let ttft = first_token_at.unwrap_or(total_dur);
