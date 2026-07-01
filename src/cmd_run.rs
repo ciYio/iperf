@@ -145,7 +145,8 @@ pub async fn run(args: RunArgs) -> anyhow::Result<()> {
             msg
         } else {
             let user_prompt = prompt_gen.get(idx);
-            let sys_prompt = "Please continue writing extensively, as much as possible.";
+            let min_words = cfg.output_tokens * 5;
+            let sys_prompt = format!("Please continue writing. Write at least {} words.", min_words);
             let mut msg = serde_json::json!({
                 "model": cfg.model,
                 "messages": [

@@ -11,7 +11,7 @@ use crate::backend::Backend;
 use crate::metrics::{calc_prefill_decode, calc_stats, Collector, PrefillDecodeSummary, Sample, Stats};
 use crate::error::Result;
 
-use super::{new_benchmark_request, new_benchmark_request_with_system, PromptGenerator, SystemPromptGenerator};
+use super::{new_benchmark_request_with_system, PromptGenerator, SystemPromptGenerator};
 
 pub struct Runner {
     pub backend: Arc<dyn Backend>,
@@ -170,7 +170,8 @@ impl Runner {
                             prompt
                         };
                         let prompt_char_len = prompt.len();
-                        let sys_prompt = "Please continue writing extensively, as much as possible.".to_string();
+                        let min_words = max_tokens * 5;
+                        let sys_prompt = format!("Please continue writing. Write at least {} words.", min_words);
                         let mut req = new_benchmark_request_with_system(&model, &sys_prompt, &prompt, max_tokens);
                         req.no_cache = no_cache;
                         (req, prompt_char_len)

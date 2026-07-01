@@ -149,19 +149,6 @@ impl SystemPromptGenerator {
     }
 }
 
-pub fn new_benchmark_request(model: &str, prompt: &str, max_tokens: usize) -> Request {
-    Request {
-        model: model.to_string(),
-        messages: vec![Message {
-            role: "user".to_string(),
-            content: prompt.to_string(),
-        }],
-        max_tokens,
-        temperature: 0.0,
-        no_cache: false,
-    }
-}
-
 pub fn new_benchmark_request_with_system(
     model: &str, system_prompt: &str, user_prompt: &str, max_tokens: usize,
 ) -> Request {
