@@ -97,7 +97,17 @@ async fn cmd_hub_download(args: cli::HubDownloadArgs) -> anyhow::Result<()> {
             dl.offset = args.offset;
             dl.count = args.count;
         }
-        dl.download_all().await?;
+        if args.check_only {
+            dl.target = args.target.clone();
+            let result = dl.check_files().await?;
+            result.print_summary();
+            if !result.is_ok() {
+                std::process::exit(1);
+            }
+        } else {
+            dl.download_all().await?;
+            println!("Download complete: {}", dest_dir.display());
+        }
     } else {
         let mut dl = Downloader::new(
             &args.model_id,
@@ -111,9 +121,19 @@ async fn cmd_hub_download(args: cli::HubDownloadArgs) -> anyhow::Result<()> {
             dl.offset = args.offset;
             dl.count = args.count;
         }
-        dl.download_all().await?;
+
+        if args.check_only {
+            dl.target = args.target.clone();
+            let result = dl.check_files().await?;
+            result.print_summary();
+            if !result.is_ok() {
+                std::process::exit(1);
+            }
+        } else {
+            dl.download_all().await?;
+            println!("Download complete: {}", dest_dir.display());
+        }
     }
 
-    println!("Download complete: {}", dest_dir.display());
     Ok(())
 }

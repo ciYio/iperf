@@ -175,6 +175,12 @@ pub struct HubDownloadArgs {
     /// Role for distributed download (e.g. "1/4", "2/4")
     #[arg(long)]
     pub role: Option<String>,
+    /// Check file integrity without downloading (verifies SHA256 for HuggingFace)
+    #[arg(long)]
+    pub check_only: bool,
+    /// Target file to check (only with --check-only)
+    #[arg(long)]
+    pub target: Option<String>,
 }
 
 #[derive(clap::Args)]
