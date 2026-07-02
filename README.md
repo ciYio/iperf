@@ -69,6 +69,7 @@ Options:
   -f, --format <FORMAT>                输出格式: table, json [default: table]
       --output-dir <DIR>               JSONL 输出目录 [default: 二进制同级 output/]
       --http-proxy <URL>               HTTP 代理
+      --timeout <SECS>                 请求超时时间（秒）[default: 720]
       --trace [<N>]                    输出第 N 个请求的 curl 命令并退出 [default: 1]
       --warmup                         标记为预热（输出带 warmup: true）
       --tag <TAG>                      结果标签
@@ -219,6 +220,31 @@ iperf run -m model --trace 3 --system-prompt-tokens 50 --num-system-prompts 3
   [==================>         ] 15/20 requests, 0 errors
 ```
 
+### 错误输出
+
+请求失败时，错误会实时输出到控制台：
+
+```
+[error] Request #5: backend error: Request timeout (exceeded 150s)
+[error] Request #12: HTTP request failed: connection reset
+```
+
+### Per-request 统计
+
+使用 `--per` 时显示每个请求的详细统计：
+
+```
+Per-request stats:
+  #1    prompt=256    cached=200   hit_rate=78.1% completion=150    e2e=2.5s
+  #2    prompt=256    cached=200   hit_rate=78.1% completion=148    e2e=2.3s
+```
+
+- **prompt**: 输入 token 数
+- **cached**: 缓存命中的 token 数
+- **hit_rate**: 缓存命中率
+- **completion**: 输出 token 数
+- **e2e**: 端到端延迟（从发送请求到收到完整响应）
+
 ### JSONL 输出
 
 结果自动追加到 `{output_dir}/{model_name}.jsonl`（或 `{model_name}-{tag}.jsonl`）。
@@ -269,6 +295,13 @@ src/
 - `--duration Ds` — 到达时长后停止
 - 两者都不设 — 运行直到 Ctrl+C（`duration=0` 表示无限制）
 - `--request-count` 和 `--duration` 同时设置时，`--request-count` 优先
+
+## 超时处理
+
+- `--timeout SECS` — 单个请求的超时时间（默认 720 秒）
+- 超时后会输出错误：`[error] Request #N: backend error: Request timeout (exceeded Xs)`
+- 超时的请求计入错误计数，worker 继续处理下一个请求
+- 使用 `--http-proxy` 时 timeout 同样生效
 
 ## License
 
