@@ -198,8 +198,9 @@ impl Renderer {
                 } else {
                     0.0
                 };
-                println!("  #{:<4} prompt={:<6} cached={:<6} hit_rate={:.1}% completion={}",
-                    i + 1, s.prompt_tokens, s.cached_tokens, hit_rate, s.output_tokens);
+                let e2e = fmt_dur(s.total_dur);
+                println!("  #{:<4} prompt={:<6} cached={:<6} hit_rate={:.1}% completion={:<6} e2e={}",
+                    i + 1, s.prompt_tokens, s.cached_tokens, hit_rate, s.output_tokens, e2e);
             }
             println!();
         }

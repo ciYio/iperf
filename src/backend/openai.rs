@@ -14,6 +14,7 @@ pub struct OpenAIBackend {
     #[allow(dead_code)]
     name: String,
     client: Client,
+    timeout: Duration,
 }
 
 impl OpenAIBackend {
@@ -29,6 +30,7 @@ impl OpenAIBackend {
             base_url: base_url.trim_end_matches('/').to_string(),
             name: name.to_string(),
             client,
+            timeout: HTTP_TIMEOUT,
         }
     }
 
@@ -37,7 +39,7 @@ impl OpenAIBackend {
             if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
                 self.client = Client::builder()
                     .http1_only()
-                    .timeout(HTTP_TIMEOUT)
+                    .timeout(self.timeout)
                     .pool_idle_timeout(Duration::from_secs(1))
                     .danger_accept_invalid_certs(true)
                     .proxy(proxy)
@@ -49,6 +51,7 @@ impl OpenAIBackend {
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
         self.client = Client::builder()
             .http1_only()
             .timeout(timeout)
@@ -151,6 +154,7 @@ impl Backend for OpenAIBackend {
             base_url: self.base_url.clone(),
             name: self.name.clone(),
             client: self.client.clone(),
+            timeout: self.timeout,
         }.with_proxy(proxy);
         Some(Box::new(new_self))
     }
@@ -160,6 +164,7 @@ impl Backend for OpenAIBackend {
             base_url: self.base_url.clone(),
             name: self.name.clone(),
             client: self.client.clone(),
+            timeout: self.timeout,
         }.with_timeout(timeout);
         Some(Box::new(new_self))
     }
@@ -178,10 +183,18 @@ impl Backend for OpenAIBackend {
         };
 
         let url = format!("{}/chat/completions", self.base_url);
-        let resp = self.client.post(&url)
+        let resp = match self.client.post(&url)
             .json(&body)
             .send()
-            .await?;
+            .await {
+                Ok(r) => r,
+                Err(e) => {
+                    if e.is_timeout() {
+                        return Err(AppError::Backend(format!("Request timeout (exceeded {}s)", self.timeout.as_secs())));
+                    }
+                    return Err(e.into());
+                }
+            };
 
         let status = resp.status();
         if !status.is_success() {
@@ -246,11 +259,19 @@ impl Backend for OpenAIBackend {
         };
 
         let url = format!("{}/chat/completions", self.base_url);
-        let resp = self.client.post(&url)
+        let resp = match self.client.post(&url)
             .header("Accept", "text/event-stream")
             .json(&body)
             .send()
-            .await?;
+            .await {
+                Ok(r) => r,
+                Err(e) => {
+                    if e.is_timeout() {
+                        return Err(AppError::Backend(format!("Request timeout (exceeded {}s)", self.timeout.as_secs())));
+                    }
+                    return Err(e.into());
+                }
+            };
 
         let status = resp.status();
         if !status.is_success() {
@@ -272,7 +293,15 @@ impl Backend for OpenAIBackend {
         let mut done = false; // set after finish_reason, break on next iteration
 
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    if e.is_timeout() {
+                        return Err(AppError::Backend(format!("Request timeout (exceeded {}s)", self.timeout.as_secs())));
+                    }
+                    return Err(e.into());
+                }
+            };
             buf.extend_from_slice(chunk.chunk());
 
             // Process complete SSE events (separated by \n\n or \r\n\r\n)

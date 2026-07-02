@@ -96,7 +96,17 @@ pub fn new_backend(name: &str, base_url: &str, http_proxy: &str, timeout: Durati
     let registry = REGISTRY.lock().unwrap();
     let ctor = registry.get(name).ok_or_else(|| AppError::UnknownBackend(name.to_string()))?;
     let backend = ctor(base_url);
-    // Apply timeout if supported
+    // Apply proxy first (if supported)
+    let backend = if !http_proxy.is_empty() {
+        if let Some(backend_with_proxy) = backend.with_proxy_opt(http_proxy) {
+            backend_with_proxy
+        } else {
+            backend
+        }
+    } else {
+        backend
+    };
+    // Apply timeout last (if supported) - ensures timeout is not lost when proxy is set
     let backend = if timeout.as_secs() > 0 {
         if let Some(backend_with_timeout) = backend.with_timeout_opt(timeout) {
             backend_with_timeout
@@ -106,12 +116,6 @@ pub fn new_backend(name: &str, base_url: &str, http_proxy: &str, timeout: Durati
     } else {
         backend
     };
-    // Apply proxy if supported
-    if !http_proxy.is_empty() {
-        if let Some(backend_with_proxy) = backend.with_proxy_opt(http_proxy) {
-            return Ok(backend_with_proxy);
-        }
-    }
     Ok(backend)
 }
 

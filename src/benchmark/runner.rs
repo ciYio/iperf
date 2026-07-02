@@ -213,7 +213,7 @@ impl Runner {
                             collector.add(resp.timing.to_sample());
                         }
                         Err(e) => {
-                            let _ = e; // suppress warning
+                            eprintln!("[error] Request #{}: {}", req_num, e);
                             error_count.fetch_add(1, Ordering::Relaxed);
                         }
                     }
